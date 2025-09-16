@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,12 +11,9 @@ import {
   Alert,
   Animated,
   ScrollView,
-  Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-
-const { width, height } = Dimensions.get('window');
 
 export default function RegisterScreen() {
   const [formData, setFormData] = useState({
@@ -31,7 +28,7 @@ export default function RegisterScreen() {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
 
-  React.useEffect(() => {
+  useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
@@ -46,51 +43,37 @@ export default function RegisterScreen() {
     ]).start();
   }, []);
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const validateForm = () => {
     const { fullName, phoneNumber, email, password, confirmPassword } = formData;
-
     if (!fullName || !phoneNumber || !email || !password || !confirmPassword) {
       Alert.alert('Error', 'Please fill in all fields');
       return false;
     }
-
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
       return false;
     }
-
     if (password.length < 6) {
       Alert.alert('Error', 'Password must be at least 6 characters long');
       return false;
     }
-
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       Alert.alert('Error', 'Please enter a valid email address');
       return false;
     }
-
     return true;
   };
 
   const handleRegister = () => {
     if (!validateForm()) return;
-
-    // For now, just navigate to home - no database storage
-    Alert.alert(
-      'Success',
-      'Registration successful! Welcome to Cow Farm Management.',
-      [
-        {
-          text: 'OK',
-          onPress: () => router.replace('/(tabs)'),
-        },
-      ]
-    );
+    Alert.alert('Success', 'Registration successful! Welcome to Cow Farm Management.', [
+      { text: 'OK', onPress: () => router.replace('/home') },
+    ]);
   };
 
   const navigateToLogin = () => {
@@ -103,10 +86,7 @@ export default function RegisterScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <Animated.View
             style={[
               styles.content,
@@ -116,14 +96,7 @@ export default function RegisterScreen() {
               },
             ]}
           >
-            {/* Header */}
             <View style={styles.header}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={() => router.back()}
-              >
-                <Ionicons name="arrow-back" size={24} color="#4CAF50" />
-              </TouchableOpacity>
               <View style={styles.iconContainer}>
                 <Ionicons name="person-add" size={50} color="#4CAF50" />
               </View>
@@ -131,7 +104,6 @@ export default function RegisterScreen() {
               <Text style={styles.subtitle}>Join Cow Farm Management</Text>
             </View>
 
-            {/* Form */}
             <View style={styles.form}>
               <View style={styles.inputContainer}>
                 <Ionicons name="person" size={20} color="#666" style={styles.inputIcon} />
@@ -179,15 +151,8 @@ export default function RegisterScreen() {
                   secureTextEntry={!showPassword}
                   placeholderTextColor="#999"
                 />
-                <TouchableOpacity
-                  onPress={() => setShowPassword(!showPassword)}
-                  style={styles.eyeIcon}
-                >
-                  <Ionicons
-                    name={showPassword ? 'eye-off' : 'eye'}
-                    size={20}
-                    color="#666"
-                  />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
+                  <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color="#666" />
                 </TouchableOpacity>
               </View>
 
@@ -201,15 +166,8 @@ export default function RegisterScreen() {
                   secureTextEntry={!showConfirmPassword}
                   placeholderTextColor="#999"
                 />
-                <TouchableOpacity
-                  onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-                  style={styles.eyeIcon}
-                >
-                  <Ionicons
-                    name={showConfirmPassword ? 'eye-off' : 'eye'}
-                    size={20}
-                    color="#666"
-                  />
+                <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeIcon}>
+                  <Ionicons name={showConfirmPassword ? 'eye-off' : 'eye'} size={20} color="#666" />
                 </TouchableOpacity>
               </View>
 
@@ -219,7 +177,6 @@ export default function RegisterScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Footer */}
             <View style={styles.footer}>
               <Text style={styles.footerText}>Already have an account? </Text>
               <TouchableOpacity onPress={navigateToLogin}>
@@ -234,32 +191,11 @@ export default function RegisterScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 30,
-    paddingVertical: 20,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 40,
-    position: 'relative',
-  },
-  backButton: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    padding: 10,
-  },
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  keyboardView: { flex: 1 },
+  scrollContent: { flexGrow: 1 },
+  content: { flex: 1, paddingHorizontal: 30, paddingVertical: 20 },
+  header: { alignItems: 'center', marginBottom: 40 },
   iconContainer: {
     width: 80,
     height: 80,
@@ -270,29 +206,14 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     marginTop: 20,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    textAlign: 'center',
-  },
-  form: {
-    marginBottom: 30,
-  },
+  title: { fontSize: 26, fontWeight: 'bold', color: '#2c3e50', marginBottom: 8, textAlign: 'center' },
+  subtitle: { fontSize: 14, color: '#7f8c8d', textAlign: 'center' },
+  form: { marginBottom: 30 },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -301,26 +222,14 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     paddingHorizontal: 15,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
   },
-  inputIcon: {
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    paddingVertical: 15,
-    fontSize: 16,
-    color: '#2c3e50',
-  },
-  eyeIcon: {
-    padding: 5,
-  },
+  inputIcon: { marginRight: 10 },
+  input: { flex: 1, paddingVertical: 15, fontSize: 16, color: '#2c3e50' },
+  eyeIcon: { padding: 5 },
   registerButton: {
     backgroundColor: '#4CAF50',
     borderRadius: 12,
@@ -330,33 +239,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
     shadowColor: '#4CAF50',
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 8,
   },
-  registerButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginRight: 10,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  footerText: {
-    color: '#7f8c8d',
-    fontSize: 16,
-  },
-  loginLink: {
-    color: '#4CAF50',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  registerButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold', marginRight: 10 },
+  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 20 },
+  footerText: { color: '#7f8c8d', fontSize: 16 },
+  loginLink: { color: '#4CAF50', fontSize: 16, fontWeight: 'bold' },
 });
+
+

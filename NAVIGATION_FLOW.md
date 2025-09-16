@@ -79,3 +79,4 @@ App Start → Landing → Login/Register → Dashboard → Cows Management
 - **Icons**: Ionicons for consistent iconography
 - **Typography**: Clean, readable fonts with proper hierarchy
 - **Layout**: Card-based design with shadows and rounded corners
+
