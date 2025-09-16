@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Dimensions, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Animated, Dimensions, SafeAreaView, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 
 const { width } = Dimensions.get('window');
+const ANDROID_STATUS_BAR = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : 0;
 
 export default function HomeScreen() {
   const [fadeAnim] = useState(new Animated.Value(0));
@@ -26,6 +27,22 @@ export default function HomeScreen() {
   ];
 
   const handleItemPress = (route) => {
+    if (route === '/cow-registration') {
+      router.push('/cow-registration');
+      return;
+    }
+    if (route === '/cow-info') {
+      router.push('/cow-info');
+      return;
+    }
+    if (route === '/milk-production') {
+      router.push('/milk-production');
+      return;
+    }
+    if (route === '/expenses') {
+      router.push('/expenses');
+      return;
+    }
     console.log(`Navigate to: ${route}`);
   };
 
@@ -65,7 +82,11 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <ScrollView style={styles.dashboard} showsVerticalScrollIndicator={false}>
+        <ScrollView
+          style={styles.dashboard}
+          contentContainerStyle={styles.dashboardContent}
+          showsVerticalScrollIndicator={false}
+        >
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.grid}>
             {dashboardItems.map((item, index) => (
@@ -88,11 +109,11 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
-  content: { flex: 1 },
+  content: { flex: 1, paddingTop: 12, paddingBottom: 16 },
   header: {
     backgroundColor: 'white',
     paddingHorizontal: 20,
-    paddingTop: 20,
+    paddingTop: 20 + ANDROID_STATUS_BAR,
     paddingBottom: 30,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -109,6 +130,7 @@ const styles = StyleSheet.create({
   statNumber: { fontSize: 20, fontWeight: 'bold', color: '#2c3e50', marginTop: 8 },
   statLabel: { fontSize: 12, color: '#7f8c8d', marginTop: 4, textAlign: 'center' },
   dashboard: { flex: 1, paddingHorizontal: 20 },
+  dashboardContent: { paddingBottom: 24, paddingTop: 16 },
   sectionTitle: { fontSize: 20, fontWeight: 'bold', color: '#2c3e50', marginTop: 20, marginBottom: 15 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
   gridItem: { width: (width - 60) / 2, marginBottom: 15 },
