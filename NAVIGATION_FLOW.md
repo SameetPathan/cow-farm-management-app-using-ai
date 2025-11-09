@@ -80,3 +80,4 @@ App Start → Landing → Login/Register → Dashboard → Cows Management
 - **Typography**: Clean, readable fonts with proper hierarchy
 - **Layout**: Card-based design with shadows and rounded corners
 
+

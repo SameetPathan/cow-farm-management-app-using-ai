@@ -13,11 +13,15 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { database } from '../firebaseConfig';
+import { ref, get, child } from 'firebase/database';
 
 export default function LoginScreen() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
 
@@ -36,12 +40,60 @@ export default function LoginScreen() {
     ]).start();
   }, []);
 
-  const handleLogin = () => {
+  const validateForm = () => {
     if (!phoneNumber || !password) {
       Alert.alert('Error', 'Please fill in all fields');
-      return;
+      return false;
     }
-    router.replace('/home');
+    // Phone number validation (10 digits)
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phoneNumber)) {
+      Alert.alert('Error', 'Please enter a valid 10-digit phone number');
+      return false;
+    }
+    return true;
+  };
+
+  const handleLogin = () => {
+    if (!validateForm()) return;
+
+    setIsLoading(true);
+
+    // Check if user exists in the database with the provided phone number
+    const dbRef = ref(database);
+    get(child(dbRef, `CowFarm/users/${phoneNumber}`))
+      .then((snapshot) => {
+        setIsLoading(false);
+        
+        if (snapshot.exists()) {
+          const userData = snapshot.val();
+          
+          // Verify password
+          if (userData.password === password) {
+            // Store login info in AsyncStorage
+            AsyncStorage.setItem('userPhone', phoneNumber)
+              .then(() => {
+                Alert.alert('Success', 'Login successful!', [
+                  { 
+                    text: 'OK', 
+                    onPress: () => router.replace('/home')
+                  }
+                ]);
+              })
+              .catch((error) => {
+                Alert.alert('Error', 'Failed to save login status: ' + error.message);
+              });
+          } else {
+            Alert.alert('Error', 'Incorrect password');
+          }
+        } else {
+          Alert.alert('Error', 'User not found. Please register first.');
+        }
+      })
+      .catch((error) => {
+        setIsLoading(false);
+        Alert.alert('Error', 'Login failed: ' + error.message);
+      });
   };
 
   const navigateToRegister = () => {
@@ -99,9 +151,15 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-              <Text style={styles.loginButtonText}>Login</Text>
-              <Ionicons name="arrow-forward" size={20} color="white" />
+            <TouchableOpacity 
+              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]} 
+              onPress={handleLogin}
+              disabled={isLoading}
+            >
+              <Text style={styles.loginButtonText}>
+                {isLoading ? 'Signing in...' : 'Login'}
+              </Text>
+              {!isLoading && <Ionicons name="arrow-forward" size={20} color="white" />}
             </TouchableOpacity>
           </View>
 
@@ -168,6 +226,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 8,
+  },
+  loginButtonDisabled: {
+    opacity: 0.6,
   },
   loginButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold', marginRight: 10 },
   footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },

@@ -1,28 +1,47 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal } from 'react-native';
+
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { router } from 'expo-router';
+import { child, get, ref, set } from 'firebase/database';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { database } from '../firebaseConfig';
-import { ref, get, set, child } from 'firebase/database';
 
-const TABS = ['Overview', 'Vitals', 'Production', 'Intake', 'Health'];
+const HEALTH_STATUS = ['Healthy', 'Sick', 'Under Treatment', 'Recovering'];
+const ILLNESS_TYPES = [
+  'Fever',
+  'Digestive Issue',
+  'Respiratory',
+  'Skin Infection',
+  'Foot Problem',
+  'Mastitis',
+  'Eye Infection',
+  'Injury',
+  'Other'
+];
 
-function TabButton({ label, active, onPress }) {
+function StatusChip({ label, active, onPress, color }) {
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    <TouchableOpacity 
+      onPress={onPress} 
+      style={[
+        styles.statusChip, 
+        active && { backgroundColor: color || '#10b981', borderColor: color || '#10b981' }
+      ]}
+    >
+      <Text style={[styles.statusChipText, active && styles.statusChipTextActive]}>
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
 
-export default function CowInfoScreen() {
-  const [mode, setMode] = useState('initial'); // 'initial', 'cowSelected', 'enterReport', 'viewDetails'
-  const [activeTab, setActiveTab] = useState('Overview');
+export default function DailyReportsScreen() {
+  const [mode, setMode] = useState('initial'); // 'initial', 'cowSelected', 'enterData', 'viewDetails'
   const [searchQuery, setSearchQuery] = useState('');
-  const [cowData, setCowData] = useState(null); // Cow registration data
-  const [records, setRecords] = useState({}); // { 'YYYY-MM-DD': { ...fields } }
+  const [cowData, setCowData] = useState(null);
+  const [reports, setReports] = useState({}); // { 'YYYY-MM-DD': {...} }
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [scanVisible, setScanVisible] = useState(false);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
@@ -61,7 +80,7 @@ export default function CowInfoScreen() {
     return `${y}-${m}-${d}`;
   }, []);
 
-  const data = records[dateKey] || null;
+  const currentReport = reports[dateKey] || null;
 
   const formatPrettyDate = (date) => {
     return date.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
@@ -91,7 +110,7 @@ export default function CowInfoScreen() {
         return true;
       }
 
-      // If not found by ID, search by name (need to query all cows)
+      // If not found by ID, search by name
       const cowsRef = ref(database, 'CowFarm/cows');
       const allCowsSnapshot = await get(cowsRef);
       
@@ -121,32 +140,43 @@ export default function CowInfoScreen() {
     }
   };
 
-  // Load daily report for selected date
-  const loadDailyReport = async (date) => {
+  // Load health report data for selected date
+  const loadReportData = async (date) => {
     if (!cowData || !cowData.uniqueId) return;
     
     setIsLoading(true);
     try {
       const dbRef = ref(database);
-      const reportPath = `CowFarm/reports/${cowData.uniqueId}/${date}`;
+      const reportPath = `CowFarm/healthReports/${cowData.uniqueId}/${date}`;
       const reportSnapshot = await get(child(dbRef, reportPath));
       
       if (reportSnapshot.exists()) {
-        const report = reportSnapshot.val();
-        setRecords(prev => ({
+        const reportData = reportSnapshot.val();
+        setReports(prev => ({
           ...prev,
-          [date]: report
+          [date]: reportData
         }));
       } else {
-        // Initialize empty record for this date
-        setRecords(prev => ({
+        // Initialize empty report for this date
+        setReports(prev => ({
           ...prev,
-          [date]: {}
+          [date]: {
+            healthStatus: '',
+            illnessType: '',
+            symptoms: '',
+            temperature: '',
+            appetite: '',
+            medication: '',
+            veterinarianVisit: false,
+            veterinarianName: '',
+            treatmentCost: '',
+            notes: ''
+          }
         }));
       }
       setIsLoading(false);
     } catch (error) {
-      console.error('Error loading daily report:', error);
+      console.error('Error loading report data:', error);
       setIsLoading(false);
     }
   };
@@ -165,19 +195,19 @@ export default function CowInfoScreen() {
     await fetchCowData(searchQuery.trim());
   };
 
-  const handleEnterReport = () => {
+  const handleEnterData = () => {
     setSelectedDate(new Date());
-    setMode('enterReport');
-    loadDailyReport(todayKey);
+    setMode('enterData');
+    loadReportData(todayKey);
   };
 
   const handleViewDetails = () => {
     setMode('viewDetails');
-    loadDailyReport(dateKey);
+    loadReportData(dateKey);
   };
 
-  const updateRecord = (field, value) => {
-    setRecords((prev) => ({
+  const updateReport = (field, value) => {
+    setReports((prev) => ({
       ...prev,
       [dateKey]: {
         ...(prev[dateKey] || {}),
@@ -192,10 +222,16 @@ export default function CowInfoScreen() {
       return;
     }
 
+    const report = reports[dateKey];
+    if (!report?.healthStatus) {
+      Alert.alert('Validation Error', 'Please select a health status');
+      return;
+    }
+
     setIsLoading(true);
     try {
       const reportData = {
-        ...records[dateKey],
+        ...report,
         cowId: cowData.uniqueId,
         cowName: cowData.name,
         date: dateKey,
@@ -204,15 +240,15 @@ export default function CowInfoScreen() {
       };
 
       const dbRef = ref(database);
-      const reportPath = `CowFarm/reports/${cowData.uniqueId}/${dateKey}`;
+      const reportPath = `CowFarm/healthReports/${cowData.uniqueId}/${dateKey}`;
       await set(child(dbRef, reportPath), reportData);
 
-      Alert.alert('Success', `Report saved for ${formatPrettyDate(selectedDate)}`, [
+      Alert.alert('Success', `Health report saved for ${formatPrettyDate(selectedDate)}`, [
         { text: 'OK', onPress: () => setMode('cowSelected') }
       ]);
       setIsLoading(false);
     } catch (error) {
-      console.error('Error saving report:', error);
+      console.error('Error saving report data:', error);
       Alert.alert('Error', 'Failed to save report: ' + error.message);
       setIsLoading(false);
     }
@@ -222,26 +258,26 @@ export default function CowInfoScreen() {
     const newDate = new Date(selectedDate);
     newDate.setDate(newDate.getDate() - 1);
     setSelectedDate(newDate);
-    loadDailyReport(formatDate(newDate));
+    loadReportData(formatDate(newDate));
   };
 
   const goNextDay = () => {
     const newDate = new Date(selectedDate);
     newDate.setDate(newDate.getDate() + 1);
     setSelectedDate(newDate);
-    loadDailyReport(formatDate(newDate));
+    loadReportData(formatDate(newDate));
   };
 
   const goToday = () => {
     const now = new Date();
     setSelectedDate(now);
-    loadDailyReport(todayKey);
+    loadReportData(todayKey);
   };
 
   const handleDateSelect = () => {
     setSelectedDate(new Date(tempSelectedDate));
     const dateStr = formatDate(tempSelectedDate);
-    loadDailyReport(dateStr);
+    loadReportData(dateStr);
     setDatePickerVisible(false);
   };
 
@@ -258,17 +294,25 @@ export default function CowInfoScreen() {
     return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
   };
 
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'Healthy': return '#10b981';
+      case 'Sick': return '#ef4444';
+      case 'Under Treatment': return '#f59e0b';
+      case 'Recovering': return '#3b82f6';
+      default: return '#6b7280';
+    }
+  };
+
   const renderCalendar = () => {
     const daysInMonth = getDaysInMonth(tempSelectedDate);
     const firstDay = getFirstDayOfMonth(tempSelectedDate);
     const days = [];
     
-    // Add empty cells for days before the first day of the month
     for (let i = 0; i < firstDay; i++) {
       days.push(null);
     }
     
-    // Add days of the month
     for (let day = 1; day <= daysInMonth; day++) {
       days.push(day);
     }
@@ -355,125 +399,165 @@ export default function CowInfoScreen() {
     );
   };
 
-  const renderOverview = () => (
+  const renderHealthForm = () => (
     <View style={styles.card}>
-      <Text style={styles.label}>Cow ID</Text>
-      <TextInput value={cowData?.uniqueId || ''} editable={false} style={[styles.input, styles.disabledInput]} />
+      <View style={styles.cowInfo}>
+        <Ionicons name="medical" size={20} color="#ef4444" />
+        <View style={styles.cowMeta}>
+          <Text style={styles.cowIdText} numberOfLines={1} ellipsizeMode="tail">
+            {cowData?.uniqueId || 'No Cow Selected'}
+          </Text>
+          {cowData?.name && (
+            <Text style={styles.cowNameText} numberOfLines={1} ellipsizeMode="tail">{cowData.name}</Text>
+          )}
+        </View>
+      </View>
 
-      <Text style={styles.label}>Name</Text>
-      <TextInput value={cowData?.name || ''} editable={false} style={[styles.input, styles.disabledInput]} />
+      {/* Health Status */}
+      <Text style={styles.label}>Health Status *</Text>
+      <View style={styles.statusRow}>
+        {HEALTH_STATUS.map((status) => (
+          <StatusChip
+            key={status}
+            label={status}
+            active={currentReport?.healthStatus === status}
+            onPress={() => mode === 'enterData' && updateReport('healthStatus', status)}
+            color={getStatusColor(status)}
+          />
+        ))}
+      </View>
 
-      <Text style={styles.label}>Breed</Text>
-      <TextInput value={cowData?.breed || ''} editable={false} style={[styles.input, styles.disabledInput]} />
+      {/* Show illness fields if not healthy */}
+      {currentReport?.healthStatus && currentReport.healthStatus !== 'Healthy' && (
+        <>
+          <Text style={styles.label}>Illness Type</Text>
+          <View style={styles.illnessRow}>
+            {ILLNESS_TYPES.map((illness) => (
+              <TouchableOpacity
+                key={illness}
+                onPress={() => mode === 'enterData' && updateReport('illnessType', illness)}
+                style={[
+                  styles.illnessButton,
+                  currentReport?.illnessType === illness && styles.illnessButtonActive,
+                  mode === 'viewDetails' && styles.illnessButtonDisabled
+                ]}
+                disabled={mode === 'viewDetails'}
+              >
+                <Text style={[
+                  styles.illnessText,
+                  currentReport?.illnessType === illness && styles.illnessTextActive
+                ]}>
+                  {illness}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-      <Text style={styles.label}>Date of Birth</Text>
-      <TextInput value={cowData?.dob || ''} editable={false} style={[styles.input, styles.disabledInput]} />
-    </View>
-  );
+          <Text style={styles.label}>Symptoms</Text>
+          <TextInput
+            value={currentReport?.symptoms || ''}
+            onChangeText={(v) => updateReport('symptoms', v)}
+            style={[styles.input, styles.textarea]}
+            placeholder="Describe symptoms observed..."
+            multiline
+            editable={mode === 'enterData'}
+          />
+        </>
+      )}
 
-  const renderVitals = () => (
-    <View style={styles.card}>
-      <Text style={styles.label}>Weight (kg)</Text>
+      {/* Temperature */}
+      <Text style={styles.label}>Temperature (°F)</Text>
       <TextInput 
-        value={data?.weight || ''} 
-        onChangeText={(v) => updateRecord('weight', v)} 
-        style={styles.input}
+        value={currentReport?.temperature || ''} 
+        onChangeText={(v) => updateReport('temperature', v)} 
+        style={styles.input} 
+        placeholder="Normal: 101.5°F"
         keyboardType="decimal-pad"
-        placeholder="Enter weight"
+        editable={mode === 'enterData'}
       />
 
-      <Text style={styles.label}>Height (cm)</Text>
-      <TextInput 
-        value={data?.height || ''} 
-        onChangeText={(v) => updateRecord('height', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter height"
-      />
+      {/* Appetite */}
+      <Text style={styles.label}>Appetite</Text>
+      <View style={styles.appetiteRow}>
+        {['Normal', 'Reduced', 'Poor', 'None'].map((appetite) => (
+          <TouchableOpacity
+            key={appetite}
+            onPress={() => mode === 'enterData' && updateReport('appetite', appetite)}
+            style={[
+              styles.appetiteButton,
+              currentReport?.appetite === appetite && styles.appetiteButtonActive,
+              mode === 'viewDetails' && styles.appetiteButtonDisabled
+            ]}
+            disabled={mode === 'viewDetails'}
+          >
+            <Text style={[
+              styles.appetiteText,
+              currentReport?.appetite === appetite && styles.appetiteTextActive
+            ]}>
+              {appetite}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
-      <Text style={styles.label}>Temperature (°C)</Text>
-      <TextInput 
-        value={data?.temperature || ''} 
-        onChangeText={(v) => updateRecord('temperature', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter temperature"
-      />
-    </View>
-  );
-
-  const renderProduction = () => (
-    <View style={styles.card}>
-      <Text style={styles.label}>Milk yield (L/day)</Text>
-      <TextInput 
-        value={data?.milkYield || ''} 
-        onChangeText={(v) => updateRecord('milkYield', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter milk yield"
-      />
-    </View>
-  );
-
-  const renderIntake = () => (
-    <View style={styles.card}>
-      <Text style={styles.label}>Food intake (kg/day)</Text>
-      <TextInput 
-        value={data?.intakeFood || ''} 
-        onChangeText={(v) => updateRecord('intakeFood', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter food intake"
-      />
-
-      <Text style={styles.label}>Water intake (L/day)</Text>
-      <TextInput 
-        value={data?.intakeWater || ''} 
-        onChangeText={(v) => updateRecord('intakeWater', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter water intake"
-      />
-    </View>
-  );
-
-  const renderHealth = () => (
-    <View style={styles.card}>
-      <Text style={styles.label}>Vaccinations</Text>
+      {/* Medication */}
+      <Text style={styles.label}>Medication Given</Text>
       <TextInput
-        value={data?.vaccinations || ''}
-        onChangeText={(v) => updateRecord('vaccinations', v)}
+        value={currentReport?.medication || ''}
+        onChangeText={(v) => updateReport('medication', v)}
         style={[styles.input, styles.textarea]}
+        placeholder="List medications and dosage..."
         multiline
-        placeholder="Enter vaccination details"
+        editable={mode === 'enterData'}
       />
 
-      <Text style={styles.label}>Illness history</Text>
+      {/* Veterinarian Visit */}
+      <TouchableOpacity 
+        style={styles.checkboxRow}
+        onPress={() => mode === 'enterData' && updateReport('veterinarianVisit', !currentReport?.veterinarianVisit)}
+        disabled={mode === 'viewDetails'}
+      >
+        <View style={[styles.checkbox, currentReport?.veterinarianVisit && styles.checkboxChecked]}>
+          {currentReport?.veterinarianVisit && <Ionicons name="checkmark" size={16} color="#fff" />}
+        </View>
+        <Text style={styles.checkboxLabel}>Veterinarian Visit</Text>
+      </TouchableOpacity>
+
+      {currentReport?.veterinarianVisit && (
+        <>
+          <Text style={styles.label}>Veterinarian Name</Text>
+          <TextInput
+            value={currentReport?.veterinarianName || ''}
+            onChangeText={(v) => updateReport('veterinarianName', v)}
+            style={styles.input}
+            placeholder="Dr. Name"
+            editable={mode === 'enterData'}
+          />
+
+          <Text style={styles.label}>Treatment Cost (₹)</Text>
+          <TextInput
+            value={currentReport?.treatmentCost || ''}
+            onChangeText={(v) => updateReport('treatmentCost', v)}
+            style={styles.input}
+            placeholder="Enter amount"
+            keyboardType="decimal-pad"
+            editable={mode === 'enterData'}
+          />
+        </>
+      )}
+
+      {/* Notes */}
+      <Text style={styles.label}>Additional Notes</Text>
       <TextInput
-        value={data?.illnesses || ''}
-        onChangeText={(v) => updateRecord('illnesses', v)}
+        value={currentReport?.notes || ''}
+        onChangeText={(v) => updateReport('notes', v)}
         style={[styles.input, styles.textarea]}
+        placeholder="Any additional observations..."
         multiline
-        placeholder="Enter illness history"
+        editable={mode === 'enterData'}
       />
     </View>
   );
-
-  const Content = useMemo(() => {
-    switch (activeTab) {
-      case 'Vitals':
-        return renderVitals();
-      case 'Production':
-        return renderProduction();
-      case 'Intake':
-        return renderIntake();
-      case 'Health':
-        return renderHealth();
-      case 'Overview':
-      default:
-        return renderOverview();
-    }
-  }, [activeTab, data, cowData]);
 
   // Initial Screen - Only Scan Option
   if (mode === 'initial') {
@@ -483,16 +567,16 @@ export default function CowInfoScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.back}>
             <Ionicons name="arrow-back" size={22} color="#2c3e50" />
           </TouchableOpacity>
-          <Text style={styles.title}>Cow Information</Text>
-          <Text style={styles.subtitle}>Scan QR code to get started</Text>
+          <Text style={styles.title}>Daily Health Reports</Text>
+          <Text style={styles.subtitle}>Track cow health & illness updates</Text>
         </View>
 
         <View style={styles.initialContainer}>
           <View style={styles.scanIconContainer}>
-            <Ionicons name="qr-code-outline" size={80} color="#4CAF50" />
+            <Ionicons name="medkit-outline" size={80} color="#ef4444" />
           </View>
           <Text style={styles.initialTitle}>Scan Cow QR Code</Text>
-          <Text style={styles.initialSubtitle}>Point your camera at the cow&apos;s QR code to retrieve information</Text>
+          <Text style={styles.initialSubtitle}>Point your camera at the cow's QR code to record health updates</Text>
           
           <TouchableOpacity 
             style={styles.scanButton} 
@@ -568,7 +652,7 @@ export default function CowInfoScreen() {
             }} style={styles.back}>
               <Ionicons name="arrow-back" size={22} color="#2c3e50" />
             </TouchableOpacity>
-            <Text style={styles.title}>Cow Information</Text>
+            <Text style={styles.title}>Daily Health Reports</Text>
             <Text style={styles.subtitle}>{cowData?.name || 'Cow Details'}</Text>
           </View>
 
@@ -579,10 +663,10 @@ export default function CowInfoScreen() {
           </View>
 
           <View style={styles.actionButtonsContainer}>
-            <TouchableOpacity style={styles.actionButton} onPress={handleEnterReport}>
+            <TouchableOpacity style={styles.actionButton} onPress={handleEnterData}>
               <Ionicons name="create-outline" size={32} color="#fff" />
-              <Text style={styles.actionButtonText}>Enter Today&apos;s Report</Text>
-              <Text style={styles.actionButtonSubtext}>Add daily details for this cow</Text>
+              <Text style={styles.actionButtonText}>Enter Today's Report</Text>
+              <Text style={styles.actionButtonSubtext}>Record health status for today</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={[styles.actionButton, styles.viewButton]} onPress={handleViewDetails}>
@@ -596,7 +680,7 @@ export default function CowInfoScreen() {
     );
   }
 
-  // Enter Report or View Details Mode
+  // Enter Data or View Details Mode
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
@@ -605,7 +689,7 @@ export default function CowInfoScreen() {
             <Ionicons name="arrow-back" size={22} color="#2c3e50" />
           </TouchableOpacity>
           <Text style={styles.title}>
-            {mode === 'enterReport' ? "Enter Today's Report" : 'View Details'}
+            {mode === 'enterData' ? "Enter Today's Report" : 'View Details'}
           </Text>
           <Text style={styles.subtitle}>{cowData?.name || 'Cow Details'}</Text>
         </View>
@@ -634,41 +718,45 @@ export default function CowInfoScreen() {
           </View>
         )}
 
-        {mode === 'enterReport' && (
+        {mode === 'enterData' && (
           <View style={styles.todayBadge}>
-            <Ionicons name="calendar" size={16} color="#4CAF50" />
+            <Ionicons name="calendar" size={16} color="#ef4444" />
             <Text style={styles.todayText}>Today: {formatPrettyDate(new Date())}</Text>
           </View>
         )}
 
-        {/* Tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
-          <View style={styles.tabs}>
-            {TABS.map((t) => (
-              <TabButton key={t} label={t} active={t === activeTab} onPress={() => setActiveTab(t)} />
-            ))}
+        {/* Health Status Summary */}
+        {currentReport?.healthStatus && (
+          <View style={[styles.statusCard, { backgroundColor: getStatusColor(currentReport.healthStatus) + '20', borderColor: getStatusColor(currentReport.healthStatus) }]}>
+            <Ionicons name="pulse" size={24} color={getStatusColor(currentReport.healthStatus)} />
+            <View style={styles.statusInfo}>
+              <Text style={styles.statusLabel}>Health Status</Text>
+              <Text style={[styles.statusValue, { color: getStatusColor(currentReport.healthStatus) }]}>
+                {currentReport.healthStatus}
+              </Text>
+            </View>
           </View>
-        </ScrollView>
+        )}
 
-        {data || mode === 'enterReport' ? Content : (
+        {currentReport || mode === 'enterData' ? renderHealthForm() : (
           <View style={styles.placeholder}> 
-            <Ionicons name="information-circle" size={28} color="#9aa3a9" />
+            <Ionicons name="medical" size={28} color="#9aa3a9" />
             <Text style={styles.placeholderText}>
               {mode === 'viewDetails' 
-                ? `No report found for ${formatPrettyDate(selectedDate)}.`
-                : 'Start entering data for today.'}
+                ? `No health report found for ${formatPrettyDate(selectedDate)}.`
+                : 'Start entering health report for today.'}
             </Text>
           </View>
         )}
 
-        {mode === 'enterReport' && (
+        {mode === 'enterData' && (
           <TouchableOpacity 
             style={[styles.saveBtn, isLoading && styles.saveBtnDisabled]} 
             onPress={handleSave}
             disabled={isLoading}
           >
             <Text style={styles.saveText}>
-              {isLoading ? 'Saving...' : "Save Today's Report"}
+              {isLoading ? 'Saving...' : 'Save Health Report'}
             </Text>
             {!isLoading && <Ionicons name="checkmark" size={18} color="#fff" />}
           </TouchableOpacity>
@@ -694,13 +782,7 @@ export default function CowInfoScreen() {
             {renderCalendar()}
             
             <View style={styles.datePickerButtons}>
-              <TouchableOpacity 
-                style={[styles.datePickerButton, styles.datePickerCancelButton]}
-                onPress={() => setDatePickerVisible(false)}
-              >
-                <Text style={styles.datePickerCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
+             <TouchableOpacity 
                 style={[styles.datePickerButton, styles.datePickerConfirmButton]}
                 onPress={handleDateSelect}
               >
@@ -715,12 +797,12 @@ export default function CowInfoScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa'},
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
   content: { padding: 20, paddingBottom: 32 },
   header: { marginBottom: 10 },
   back: { padding: 6, alignSelf: 'flex-start' },
-  title: { fontSize: 24, fontWeight: '800', color: '#1f2937', marginTop: 6,paddingLeft:10 },
-  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 2,paddingLeft:10 },
+  title: { fontSize: 24, fontWeight: '800', color: '#1f2937', marginTop: 6, paddingLeft: 10 },
+  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 2, paddingLeft: 10 },
 
   // Initial Screen Styles
   initialContainer: {
@@ -733,7 +815,7 @@ const styles = StyleSheet.create({
     width: 150,
     height: 150,
     borderRadius: 75,
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#fee2e2',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 30,
@@ -752,14 +834,14 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   scanButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#ef4444',
     borderRadius: 12,
     paddingVertical: 16,
     paddingHorizontal: 32,
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 30,
-    shadowColor: '#4CAF50',
+    shadowColor: '#ef4444',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
@@ -795,7 +877,7 @@ const styles = StyleSheet.create({
     color: '#2c3e50',
   },
   searchButton: {
-    backgroundColor: '#2196F3',
+    backgroundColor: '#ef4444',
     borderRadius: 10,
     paddingVertical: 14,
     flexDirection: 'row',
@@ -842,19 +924,19 @@ const styles = StyleSheet.create({
     gap: 15,
   },
   actionButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#ef4444',
     borderRadius: 16,
     padding: 24,
     alignItems: 'center',
-    shadowColor: '#4CAF50',
+    shadowColor: '#ef4444',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 8,
   },
   viewButton: {
-    backgroundColor: '#2196F3',
-    shadowColor: '#2196F3',
+    backgroundColor: '#3b82f6',
+    shadowColor: '#3b82f6',
   },
   actionButtonText: {
     color: '#fff',
@@ -909,15 +991,15 @@ const styles = StyleSheet.create({
     minWidth: 60,
     justifyContent: 'center'
   },
-  chipBtnLight: { backgroundColor: '#e5f3e8' },
-  chipBtnPrimary: { backgroundColor: '#10b981' },
+  chipBtnLight: { backgroundColor: '#fee2e2' },
+  chipBtnPrimary: { backgroundColor: '#ef4444' },
   chipTextLight: { color: '#fff', fontWeight: '700', marginLeft: 4, fontSize: 12 },
   chipTextDark: { color: '#2c3e50', fontWeight: '700', marginHorizontal: 2, fontSize: 12 },
 
   todayBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#fee2e2',
     borderRadius: 20,
     paddingVertical: 10,
     paddingHorizontal: 16,
@@ -925,64 +1007,230 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   todayText: {
-    color: '#4CAF50',
+    color: '#ef4444',
     fontWeight: '600',
     marginLeft: 8,
     fontSize: 14,
   },
 
-  // Tabs
-  tabsContainer: { marginTop: 16 },
-  tabs: { 
-    flexDirection: 'row', 
-    backgroundColor: '#e6f7ef', 
-    borderRadius: 12, 
-    padding: 4,
-    minWidth: '100%'
-  },
-  tabButton: { 
-    paddingVertical: 12, 
-    paddingHorizontal: 16, 
-    borderRadius: 10, 
+  // Status Card
+  statusCard: {
+    backgroundColor: '#fee2e2',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    marginBottom: 16,
+    flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 80,
-    flex: 1
+    borderWidth: 2,
+    borderColor: '#ef4444',
   },
-  tabButtonActive: { backgroundColor: '#10b981' },
-  tabText: { color: '#2c3e50', fontWeight: '600', fontSize: 13 },
-  tabTextActive: { color: '#fff' },
+  statusInfo: { marginLeft: 12, flex: 1 },
+  statusLabel: { fontSize: 14, color: '#7f8c8d', fontWeight: '600' },
+  statusValue: { fontSize: 20, fontWeight: '800', marginTop: 2 },
 
   // Form
   card: {
-    backgroundColor: 'white', borderRadius: 16, padding: 16, marginTop: 16,
-    borderWidth: 1, borderColor: '#eef2f7',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
+    backgroundColor: 'white', 
+    borderRadius: 16, 
+    padding: 16, 
+    marginTop: 16,
+    borderWidth: 1, 
+    borderColor: '#eef2f7',
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 2 }, 
+    shadowOpacity: 0.06, 
+    shadowRadius: 6, 
+    elevation: 2,
   },
-  label: { fontSize: 13, color: '#6b7280', marginTop: 10, marginBottom: 6 },
-  input: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e8eb', paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, color: '#111827' },
-  disabledInput: { backgroundColor: '#f8f9fa', color: '#6b7280' },
+  cowInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  cowMeta: { marginLeft: 8, flex: 1 },
+  cowIdText: { fontSize: 16, fontWeight: '700', color: '#991b1b' },
+  cowNameText: { fontSize: 14, color: '#dc2626', marginTop: 2 },
+  label: { fontSize: 13, color: '#6b7280', marginTop: 10, marginBottom: 6, fontWeight: '600' },
+  input: { 
+    backgroundColor: '#fff', 
+    borderRadius: 12, 
+    borderWidth: 1, 
+    borderColor: '#e6e8eb', 
+    paddingHorizontal: 12, 
+    paddingVertical: 12, 
+    fontSize: 16, 
+    color: '#111827' 
+  },
   textarea: { minHeight: 90, textAlignVertical: 'top' },
 
-  placeholder: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  placeholderText: { marginTop: 8, color: '#9aa3a9', textAlign: 'center', paddingHorizontal: 20 },
+  // Status Row
+  statusRow: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 8, 
+    marginTop: 8,
+    marginBottom: 8 
+  },
+  statusChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: '#e6e8eb',
+    backgroundColor: '#fff',
+  },
+  statusChipText: { 
+    fontSize: 13, 
+    color: '#6b7280', 
+    fontWeight: '600' 
+  },
+  statusChipTextActive: { color: '#fff' },
 
-  saveBtn: { marginTop: 20, backgroundColor: '#10b981', borderRadius: 12, paddingVertical: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  // Illness Type
+  illnessRow: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 8, 
+    marginTop: 8 
+  },
+  illnessButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e6e8eb',
+    backgroundColor: '#fff',
+  },
+  illnessButtonActive: {
+    backgroundColor: '#f59e0b',
+    borderColor: '#f59e0b',
+  },
+  illnessButtonDisabled: {
+    opacity: 0.6,
+  },
+  illnessText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
+  illnessTextActive: { color: '#fff' },
+
+  // Appetite
+  appetiteRow: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 8, 
+    marginTop: 8 
+  },
+  appetiteButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#e6e8eb',
+    backgroundColor: '#fff',
+  },
+  appetiteButtonActive: {
+    backgroundColor: '#8b5cf6',
+    borderColor: '#8b5cf6',
+  },
+  appetiteButtonDisabled: {
+    opacity: 0.6,
+  },
+  appetiteText: { fontSize: 12, color: '#6b7280', fontWeight: '600' },
+  appetiteTextActive: { color: '#fff' },
+
+  // Checkbox
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#e6e8eb',
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#10b981',
+    borderColor: '#10b981',
+  },
+  checkboxLabel: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '600',
+    marginLeft: 10,
+  },
+
+  placeholder: { 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    paddingVertical: 40 
+  },
+  placeholderText: { 
+    marginTop: 8, 
+    color: '#9aa3a9', 
+    textAlign: 'center', 
+    paddingHorizontal: 20 
+  },
+
+  saveBtn: { 
+    marginTop: 20, 
+    backgroundColor: '#10b981', 
+    borderRadius: 12, 
+    paddingVertical: 14, 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
   saveBtnDisabled: { opacity: 0.6 },
-  saveText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginRight: 8 },
+  saveText: { 
+    color: '#fff', 
+    fontSize: 16, 
+    fontWeight: 'bold', 
+    marginRight: 8 
+  },
 
   // Scanner
   scanContainer: { flex: 1, backgroundColor: '#000' },
-  scanTitle: { color: '#fff', textAlign: 'center', padding: 16, fontWeight: 'bold', fontSize: 16 },
+  scanTitle: { 
+    color: '#fff', 
+    textAlign: 'center', 
+    padding: 16, 
+    fontWeight: 'bold', 
+    fontSize: 16 
+  },
   scannerBox: { flex: 1 },
   scanInfo: { color: '#fff', textAlign: 'center', marginTop: 16 },
-  scanClose: { padding: 14, backgroundColor: '#111', alignItems: 'center' },
+  scanClose: { 
+    padding: 14, 
+    backgroundColor: '#111', 
+    alignItems: 'center' 
+  },
   scanCloseText: { color: '#fff', fontWeight: '600' },
   searchBtn: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#10b981', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14,
+    flexDirection: 'row', 
+    alignItems: 'center',
+    backgroundColor: '#10b981', 
+    borderRadius: 10, 
+    paddingVertical: 12, 
+    paddingHorizontal: 14,
     marginLeft: 4,
   },
-  searchText: { color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 6 },
+  searchText: { 
+    color: '#fff', 
+    fontSize: 15, 
+    fontWeight: '600', 
+    marginLeft: 6 
+  },
 
   // Date Picker Modal Styles
   datePickerModalOverlay: {
@@ -1052,11 +1300,11 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   calendarCellSelected: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#ef4444',
     borderRadius: 20,
   },
   calendarCellToday: {
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#fee2e2',
     borderRadius: 20,
   },
   calendarDayText: {
@@ -1069,7 +1317,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   calendarDayTextToday: {
-    color: '#4CAF50',
+    color: '#ef4444',
     fontWeight: 'bold',
   },
   datePickerButtons: {
@@ -1090,7 +1338,7 @@ const styles = StyleSheet.create({
     borderColor: '#e6e8eb',
   },
   datePickerConfirmButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#ef4444',
   },
   datePickerCancelText: {
     color: '#2c3e50',

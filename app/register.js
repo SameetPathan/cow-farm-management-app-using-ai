@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { database } from '../firebaseConfig';
+import { ref, set, get, child } from 'firebase/database';
 
 export default function RegisterScreen() {
   const [formData, setFormData] = useState({
@@ -25,6 +27,7 @@ export default function RegisterScreen() {
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(50));
 
@@ -53,6 +56,12 @@ export default function RegisterScreen() {
       Alert.alert('Error', 'Please fill in all fields');
       return false;
     }
+    // Phone number validation (10 digits)
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(phoneNumber)) {
+      Alert.alert('Error', 'Please enter a valid 10-digit phone number');
+      return false;
+    }
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Passwords do not match');
       return false;
@@ -71,9 +80,54 @@ export default function RegisterScreen() {
 
   const handleRegister = () => {
     if (!validateForm()) return;
-    Alert.alert('Success', 'Registration successful! Welcome to Cow Farm Management.', [
-      { text: 'OK', onPress: () => router.replace('/home') },
-    ]);
+
+    setIsLoading(true);
+
+    // Check if user already exists with this phone number
+    const dbRef = ref(database);
+    get(child(dbRef, `CowFarm/users/${formData.phoneNumber}`))
+      .then((snapshot) => {
+        if (snapshot.exists()) {
+          setIsLoading(false);
+          Alert.alert('Error', 'User already exists with this phone number');
+        } else {
+          // Save user to Firebase Realtime Database
+          set(ref(database, `CowFarm/users/${formData.phoneNumber}`), {
+            fullName: formData.fullName,
+            email: formData.email,
+            phoneNumber: formData.phoneNumber,
+            password: formData.password,
+            createdAt: new Date().toISOString()
+          })
+            .then(() => {
+              setIsLoading(false);
+              Alert.alert('Success', 'Registration successful! Welcome to Cow Farm Management.', [
+                { 
+                  text: 'OK', 
+                  onPress: () => {
+                    // Reset form
+                    setFormData({
+                      fullName: '',
+                      phoneNumber: '',
+                      email: '',
+                      password: '',
+                      confirmPassword: '',
+                    });
+                    router.replace('/home');
+                  }
+                },
+              ]);
+            })
+            .catch((error) => {
+              setIsLoading(false);
+              Alert.alert('Error', 'Registration failed: ' + error.message);
+            });
+        }
+      })
+      .catch((error) => {
+        setIsLoading(false);
+        Alert.alert('Error', 'Database error: ' + error.message);
+      });
   };
 
   const navigateToLogin = () => {
@@ -171,9 +225,15 @@ export default function RegisterScreen() {
                 </TouchableOpacity>
               </View>
 
-              <TouchableOpacity style={styles.registerButton} onPress={handleRegister}>
-                <Text style={styles.registerButtonText}>Create Account</Text>
-                <Ionicons name="arrow-forward" size={20} color="white" />
+              <TouchableOpacity 
+                style={[styles.registerButton, isLoading && styles.registerButtonDisabled]} 
+                onPress={handleRegister}
+                disabled={isLoading}
+              >
+                <Text style={styles.registerButtonText}>
+                  {isLoading ? 'Creating Account...' : 'Create Account'}
+                </Text>
+                {!isLoading && <Ionicons name="arrow-forward" size={20} color="white" />}
               </TouchableOpacity>
             </View>
 
@@ -243,6 +303,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4.65,
     elevation: 8,
+  },
+  registerButtonDisabled: {
+    opacity: 0.6,
   },
   registerButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold', marginRight: 10 },
   footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 20 },
