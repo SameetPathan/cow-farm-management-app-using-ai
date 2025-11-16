@@ -219,6 +219,7 @@ export default function HomeScreen() {
     { id: 4, title: 'Milk Production', subtitle: 'Monitor milk yield', icon: 'water', color: '#9C27B0', route: '/milk-production' },
     { id: 5, title: 'Expenses', subtitle: 'Track farm expenses', icon: 'calculator', color: '#FF9800', route: '/expenses' },
     { id: 6, title: 'Reports', subtitle: 'View analytics', icon: 'bar-chart', color: '#607D8B', route: '/reports' },
+    { id: 7, title: 'AI Assistant', subtitle: 'Get help & advice', icon: 'chatbubbles', color: '#9333ea', route: '/chatbot' },
   ];
 
   const handleItemPress = (route) => {

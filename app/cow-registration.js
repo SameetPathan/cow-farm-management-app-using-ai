@@ -10,6 +10,7 @@ import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { database } from '../firebaseConfig';
 import { ref, set, get, child } from 'firebase/database';
+import { getCowRegistrationAI } from '../services/aiService';
 
 function generateUniqueId() {
   const timestamp = Date.now().toString(36).toUpperCase();
@@ -28,6 +29,9 @@ export default function CowRegistrationScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [isQrGenerated, setIsQrGenerated] = useState(false);
+  const [showAISuggestions, setShowAISuggestions] = useState(false);
+  const [aiSuggestions, setAiSuggestions] = useState('');
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
   const qrRef = useRef(null);
   const qrContainerRef = useRef(null);
 
@@ -167,6 +171,31 @@ export default function CowRegistrationScreen() {
       });
   };
 
+  const handleGetAISuggestions = async () => {
+    if (!name || !breed || !dob) {
+      Alert.alert('Info', 'Please fill in name, breed, and date of birth to get AI suggestions.');
+      return;
+    }
+
+    setIsLoadingAI(true);
+    try {
+      const cowData = { name, breed, dob };
+      const response = await getCowRegistrationAI(cowData);
+      
+      if (response.success) {
+        setAiSuggestions(response.suggestions);
+        setShowAISuggestions(true);
+      } else {
+        Alert.alert('Error', 'Failed to get AI suggestions. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error getting AI suggestions:', error);
+      Alert.alert('Error', 'Failed to get AI suggestions. Please check your connection.');
+    } finally {
+      setIsLoadingAI(false);
+    }
+  };
+
   const handleDownloadQr = async () => {
     if (!uniqueId) {
       Alert.alert('QR Code', 'Generate Unique ID first.');
@@ -259,6 +288,20 @@ export default function CowRegistrationScreen() {
               ))}
             </Picker>
           </View>
+
+          {/* AI Suggestions Button */}
+          {name && breed && dob && (
+            <TouchableOpacity
+              style={[styles.aiButton, isLoadingAI && styles.aiButtonDisabled]}
+              onPress={handleGetAISuggestions}
+              disabled={isLoadingAI}
+            >
+              <Ionicons name="sparkles" size={18} color="#fff" />
+              <Text style={styles.aiButtonText}>
+                {isLoadingAI ? 'Getting AI Suggestions...' : 'Get AI Suggestions'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           {/* QR Preview */}
           {!!uniqueId && (
@@ -431,6 +474,41 @@ export default function CowRegistrationScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* AI Suggestions Modal */}
+        <Modal
+          visible={showAISuggestions}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowAISuggestions(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHeaderLeft}>
+                  <Ionicons name="sparkles" size={24} color="#4CAF50" />
+                  <Text style={styles.modalTitle}>AI Suggestions</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowAISuggestions(false)}>
+                  <Ionicons name="close" size={24} color="#2c3e50" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.aiSuggestionsContent}>
+                <Text style={styles.aiSuggestionsText}>{aiSuggestions}</Text>
+              </ScrollView>
+
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={() => setShowAISuggestions(false)}
+                >
+                  <Text style={styles.confirmButtonText}>Got it</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -571,10 +649,47 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
+  modalHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#2c3e50',
+  },
+  aiButton: {
+    marginTop: 16,
+    backgroundColor: '#9333ea',
+    borderRadius: 12,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  aiButtonDisabled: {
+    opacity: 0.6,
+  },
+  aiButtonText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  aiSuggestionsContent: {
+    maxHeight: 400,
+    marginBottom: 20,
+  },
+  aiSuggestionsText: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#2c3e50',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginTop: 10,
   },
   datePickerContainer: {
     paddingVertical: 10,

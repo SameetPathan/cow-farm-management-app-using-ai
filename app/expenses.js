@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { database } from '../firebaseConfig';
 import { ref, get, set, child } from 'firebase/database';
+import { getExpensesAI } from '../services/aiService';
 
 export default function ExpensesScreen() {
   const [mode, setMode] = useState('initial'); // 'initial', 'enterExpense', 'viewDetails'
@@ -14,6 +15,9 @@ export default function ExpensesScreen() {
   const [records, setRecords] = useState({}); // { 'YYYY-MM-DD': { feed: '', doctor: '', other: '', notes: '' } }
   const [isLoading, setIsLoading] = useState(false);
   const [userPhone, setUserPhone] = useState('');
+  const [showAIAnalysis, setShowAIAnalysis] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
 
   // Get user phone number from AsyncStorage
   useEffect(() => {
@@ -112,6 +116,32 @@ export default function ExpensesScreen() {
         [field]: value,
       },
     }));
+  };
+
+  const handleGetAIAnalysis = async () => {
+    if (!data) {
+      Alert.alert('No Data', 'Please enter or view expense data first.');
+      return;
+    }
+
+    setIsLoadingAI(true);
+    try {
+      const expenseData = {
+        date: dateKey,
+        feed: data.feed || '0',
+        doctor: data.doctor || '0',
+        other: data.other || '0',
+        notes: data.notes || 'None',
+      };
+      const result = await getExpensesAI(expenseData, 'daily');
+      setAiAnalysis(result.analysis || result.suggestions || 'No analysis available.');
+      setShowAIAnalysis(true);
+    } catch (error) {
+      console.error('Error getting AI analysis:', error);
+      Alert.alert('Error', 'Failed to get AI analysis. Please try again.');
+    } finally {
+      setIsLoadingAI(false);
+    }
   };
 
   const handleSave = async () => {
@@ -415,6 +445,20 @@ export default function ExpensesScreen() {
           </View>
         </View>
 
+        {/* AI Analysis Button */}
+        {data && (mode === 'viewDetails' || mode === 'enterExpense') && (
+          <TouchableOpacity 
+            style={[styles.aiButton, isLoadingAI && styles.aiButtonDisabled]} 
+            onPress={handleGetAIAnalysis}
+            disabled={isLoadingAI}
+          >
+            <Ionicons name="sparkles" size={20} color="#fff" />
+            <Text style={styles.aiButtonText}>
+              {isLoadingAI ? 'Analyzing...' : 'Get AI Analysis'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {mode === 'enterExpense' && (
           <TouchableOpacity 
             style={[styles.saveBtn, isLoading && styles.saveBtnDisabled]} 
@@ -437,6 +481,34 @@ export default function ExpensesScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* AI Analysis Modal */}
+      <Modal
+        visible={showAIAnalysis}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAIAnalysis(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>AI Expense Analysis</Text>
+              <TouchableOpacity onPress={() => setShowAIAnalysis(false)}>
+                <Ionicons name="close" size={24} color="#2c3e50" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              <Text style={styles.aiAnalysisText}>{aiAnalysis}</Text>
+            </ScrollView>
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => setShowAIAnalysis(false)}
+            >
+              <Text style={styles.modalCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Date Picker Modal */}
       <Modal
@@ -637,6 +709,83 @@ const styles = StyleSheet.create({
   saveBtn: { marginTop: 20, backgroundColor: '#FF9800', borderRadius: 12, paddingVertical: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   saveBtnDisabled: { opacity: 0.6 },
   saveText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginRight: 8 },
+  
+  // AI Button
+  aiButton: {
+    marginTop: 16,
+    backgroundColor: '#9333ea',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#9333ea',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  aiButtonDisabled: { opacity: 0.6 },
+  aiButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  
+  // AI Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e6e8eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  modalBody: {
+    padding: 20,
+    maxHeight: 400,
+  },
+  aiAnalysisText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#2c3e50',
+  },
+  modalCloseButton: {
+    backgroundColor: '#FF9800',
+    borderRadius: 12,
+    paddingVertical: 14,
+    margin: 20,
+    alignItems: 'center',
+  },
+  modalCloseButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 
   // Date Picker Modal Styles
   datePickerModalOverlay: {

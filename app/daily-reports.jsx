@@ -5,8 +5,9 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { router } from 'expo-router';
 import { child, get, ref, set } from 'firebase/database';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import { database } from '../firebaseConfig';
+import { getDailyReportsAI } from '../services/aiService';
 
 const HEALTH_STATUS = ['Healthy', 'Sick', 'Under Treatment', 'Recovering'];
 const ILLNESS_TYPES = [
@@ -38,7 +39,7 @@ function StatusChip({ label, active, onPress, color }) {
 }
 
 export default function DailyReportsScreen() {
-  const [mode, setMode] = useState('initial'); // 'initial', 'cowSelected', 'enterData', 'viewDetails'
+  const [mode, setMode] = useState('initial'); // 'initial', 'listCows', 'cowSelected', 'enterData', 'viewDetails'
   const [searchQuery, setSearchQuery] = useState('');
   const [cowData, setCowData] = useState(null);
   const [reports, setReports] = useState({}); // { 'YYYY-MM-DD': {...} }
@@ -49,6 +50,12 @@ export default function DailyReportsScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isLoading, setIsLoading] = useState(false);
   const [userPhone, setUserPhone] = useState('');
+  const [allCows, setAllCows] = useState([]);
+  const [filteredCows, setFilteredCows] = useState([]);
+  const [isLoadingCows, setIsLoadingCows] = useState(false);
+  const [showAIAnalysis, setShowAIAnalysis] = useState(false);
+  const [aiAnalysis, setAiAnalysis] = useState('');
+  const [isLoadingAI, setIsLoadingAI] = useState(false);
 
   // Get user phone number from AsyncStorage
   useEffect(() => {
@@ -64,6 +71,67 @@ export default function DailyReportsScreen() {
     };
     getUserPhone();
   }, []);
+
+  // Load all cows when entering list mode
+  const loadAllCows = async () => {
+    if (!userPhone) return;
+    
+    setIsLoadingCows(true);
+    try {
+      const cowsRef = ref(database, 'CowFarm/cows');
+      const allCowsSnapshot = await get(cowsRef);
+      
+      if (allCowsSnapshot.exists()) {
+        const allCowsData = allCowsSnapshot.val();
+        const userCows = Object.entries(allCowsData)
+          .filter(([id, cow]) => cow.userPhoneNumber === userPhone)
+          .map(([id, cow]) => ({
+            ...cow,
+            uniqueId: id,
+          }))
+          .sort((a, b) => {
+            const nameA = (a.name || '').toLowerCase();
+            const nameB = (b.name || '').toLowerCase();
+            return nameA.localeCompare(nameB);
+          });
+        
+        setAllCows(userCows);
+        setFilteredCows(userCows);
+      } else {
+        setAllCows([]);
+        setFilteredCows([]);
+      }
+    } catch (error) {
+      console.error('Error loading cows:', error);
+      Alert.alert('Error', 'Failed to load cows: ' + error.message);
+      setAllCows([]);
+      setFilteredCows([]);
+    } finally {
+      setIsLoadingCows(false);
+    }
+  };
+
+  // Filter cows based on search query
+  useEffect(() => {
+    if (mode === 'listCows' && searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const filtered = allCows.filter(cow => 
+        cow.name?.toLowerCase().includes(query) ||
+        cow.uniqueId?.toLowerCase().includes(query) ||
+        cow.breed?.toLowerCase().includes(query)
+      );
+      setFilteredCows(filtered);
+    } else if (mode === 'listCows') {
+      setFilteredCows(allCows);
+    }
+  }, [searchQuery, allCows, mode]);
+
+  // Load cows when entering list mode and userPhone is available
+  useEffect(() => {
+    if (mode === 'listCows' && userPhone) {
+      loadAllCows();
+    }
+  }, [mode, userPhone]);
 
   const dateKey = useMemo(() => {
     const y = selectedDate.getFullYear();
@@ -193,6 +261,46 @@ export default function DailyReportsScreen() {
       return;
     }
     await fetchCowData(searchQuery.trim());
+  };
+
+  const handleListCows = () => {
+    setMode('listCows');
+  };
+
+  const handleSelectCow = (cow) => {
+    setCowData(cow);
+    setMode('cowSelected');
+    setSearchQuery('');
+  };
+
+  const handleGetAIAnalysis = async () => {
+    if (!cowData || !currentReport) {
+      Alert.alert('No Data', 'Please enter or view health report data first.');
+      return;
+    }
+
+    setIsLoadingAI(true);
+    try {
+      const reportData = {
+        date: dateKey,
+        healthStatus: currentReport.healthStatus || 'Not recorded',
+        illnessType: currentReport.illnessType || 'N/A',
+        symptoms: currentReport.symptoms || 'None',
+        temperature: currentReport.temperature || 'Not recorded',
+        appetite: currentReport.appetite || 'Not recorded',
+        medication: currentReport.medication || 'None',
+        veterinarianVisit: currentReport.veterinarianVisit || false,
+        notes: currentReport.notes || 'None',
+      };
+      const result = await getDailyReportsAI(cowData, reportData);
+      setAiAnalysis(result.analysis || result.recommendations || 'No analysis available.');
+      setShowAIAnalysis(true);
+    } catch (error) {
+      console.error('Error getting AI analysis:', error);
+      Alert.alert('Error', 'Failed to get AI analysis. Please try again.');
+    } finally {
+      setIsLoadingAI(false);
+    }
   };
 
   const handleEnterData = () => {
@@ -559,6 +667,97 @@ export default function DailyReportsScreen() {
     </View>
   );
 
+  // List Cows Screen
+  if (mode === 'listCows') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => {
+            setMode('initial');
+            setSearchQuery('');
+            setFilteredCows([]);
+          }} style={styles.back}>
+            <Ionicons name="arrow-back" size={22} color="#2c3e50" />
+          </TouchableOpacity>
+          <Text style={styles.title}>All Cows</Text>
+          <Text style={styles.subtitle}>{filteredCows.length} cow{filteredCows.length !== 1 ? 's' : ''} found</Text>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.listSearchContainer}>
+          <View style={styles.listSearchBox}>
+            <Ionicons name="search" size={20} color="#7f8c8d" style={styles.searchIcon} />
+            <TextInput
+              placeholder="Search by name, ID, or breed..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={styles.listSearchInput}
+              autoCapitalize="none"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#7f8c8d" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Cows List */}
+        {isLoadingCows ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#ef4444" />
+            <Text style={styles.loadingText}>Loading cows...</Text>
+          </View>
+        ) : filteredCows.length > 0 ? (
+          <ScrollView style={styles.cowsList} contentContainerStyle={styles.cowsListContent}>
+            {filteredCows.map((cow) => (
+              <TouchableOpacity
+                key={cow.uniqueId}
+                style={styles.cowListItem}
+                onPress={() => handleSelectCow(cow)}
+              >
+                <View style={styles.cowListItemIcon}>
+                  <Ionicons name="leaf" size={24} color="#ef4444" />
+                </View>
+                <View style={styles.cowListItemContent}>
+                  <Text style={styles.cowListItemName}>{cow.name || 'Unnamed'}</Text>
+                  <View style={styles.cowListItemDetails}>
+                    <Text style={styles.cowListItemId}>ID: {cow.uniqueId}</Text>
+                    {cow.breed && (
+                      <Text style={styles.cowListItemBreed}>• {cow.breed}</Text>
+                    )}
+                  </View>
+                  {cow.dob && (
+                    <Text style={styles.cowListItemDob}>DOB: {cow.dob}</Text>
+                  )}
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#7f8c8d" />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="leaf-outline" size={64} color="#cbd5e1" />
+            <Text style={styles.emptyText}>
+              {searchQuery.trim() 
+                ? 'No cows found matching your search' 
+                : 'No cows registered yet'}
+            </Text>
+            {!searchQuery.trim() && (
+              <TouchableOpacity 
+                style={styles.addCowButton}
+                onPress={() => router.push('/cow-registration')}
+              >
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.addCowButtonText}>Register New Cow</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
   // Initial Screen - Only Scan Option
   if (mode === 'initial') {
     return (
@@ -604,6 +803,18 @@ export default function DailyReportsScreen() {
             >
               <Ionicons name="search" size={20} color="#fff" />
               <Text style={styles.searchButtonText}>Search</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.listContainer}>
+            <Text style={styles.orText}>OR</Text>
+            <TouchableOpacity 
+              style={styles.listButton} 
+              onPress={handleListCows}
+              disabled={isLoadingCows}
+            >
+              <Ionicons name="list" size={24} color="#fff" />
+              <Text style={styles.listButtonText}>View All Cows</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -749,6 +960,20 @@ export default function DailyReportsScreen() {
           </View>
         )}
 
+        {/* AI Analysis Button */}
+        {currentReport && (mode === 'viewDetails' || mode === 'enterData') && (
+          <TouchableOpacity 
+            style={[styles.aiButton, isLoadingAI && styles.aiButtonDisabled]} 
+            onPress={handleGetAIAnalysis}
+            disabled={isLoadingAI}
+          >
+            <Ionicons name="sparkles" size={20} color="#fff" />
+            <Text style={styles.aiButtonText}>
+              {isLoadingAI ? 'Analyzing...' : 'Get AI Analysis'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {mode === 'enterData' && (
           <TouchableOpacity 
             style={[styles.saveBtn, isLoading && styles.saveBtnDisabled]} 
@@ -762,6 +987,34 @@ export default function DailyReportsScreen() {
           </TouchableOpacity>
         )}
       </ScrollView>
+
+      {/* AI Analysis Modal */}
+      <Modal
+        visible={showAIAnalysis}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowAIAnalysis(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>AI Health Analysis</Text>
+              <TouchableOpacity onPress={() => setShowAIAnalysis(false)}>
+                <Ionicons name="close" size={24} color="#2c3e50" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              <Text style={styles.aiAnalysisText}>{aiAnalysis}</Text>
+            </ScrollView>
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => setShowAIAnalysis(false)}
+            >
+              <Text style={styles.modalCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Date Picker Modal */}
       <Modal
@@ -889,6 +1142,154 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+
+  // List View Styles
+  listContainer: {
+    width: '100%',
+    paddingHorizontal: 20,
+    marginTop: 10,
+  },
+  listButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  listButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  listSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e6e8eb',
+  },
+  listSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#e6e8eb',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  listSearchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+  },
+  cowsList: {
+    flex: 1,
+  },
+  cowsListContent: {
+    padding: 16,
+  },
+  cowListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e6e8eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  cowListItemIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fee2e2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cowListItemContent: {
+    flex: 1,
+  },
+  cowListItemName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  cowListItemDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  cowListItemId: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginRight: 8,
+  },
+  cowListItemBreed: {
+    fontSize: 13,
+    color: '#7f8c8d',
+  },
+  cowListItemDob: {
+    fontSize: 12,
+    color: '#9aa3a9',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#9aa3a9',
+    textAlign: 'center',
+  },
+  addCowButton: {
+    marginTop: 24,
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  addCowButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // Cow Selected Screen
@@ -1197,6 +1598,83 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     fontWeight: 'bold', 
     marginRight: 8 
+  },
+  
+  // AI Button
+  aiButton: {
+    marginTop: 16,
+    backgroundColor: '#9333ea',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#9333ea',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  aiButtonDisabled: { opacity: 0.6 },
+  aiButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  
+  // AI Modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    width: '90%',
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e6e8eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  modalBody: {
+    padding: 20,
+    maxHeight: 400,
+  },
+  aiAnalysisText: {
+    fontSize: 15,
+    lineHeight: 24,
+    color: '#2c3e50',
+  },
+  modalCloseButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 14,
+    margin: 20,
+    alignItems: 'center',
+  },
+  modalCloseButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 
   // Scanner

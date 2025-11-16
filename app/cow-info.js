@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal } from 'react-native';
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -18,7 +18,7 @@ function TabButton({ label, active, onPress }) {
 }
 
 export default function CowInfoScreen() {
-  const [mode, setMode] = useState('initial'); // 'initial', 'cowSelected', 'enterReport', 'viewDetails'
+  const [mode, setMode] = useState('initial'); // 'initial', 'listCows', 'cowSelected', 'enterReport', 'viewDetails'
   const [activeTab, setActiveTab] = useState('Overview');
   const [searchQuery, setSearchQuery] = useState('');
   const [cowData, setCowData] = useState(null); // Cow registration data
@@ -30,6 +30,9 @@ export default function CowInfoScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isLoading, setIsLoading] = useState(false);
   const [userPhone, setUserPhone] = useState('');
+  const [allCows, setAllCows] = useState([]); // List of all cows
+  const [filteredCows, setFilteredCows] = useState([]); // Filtered cows for search
+  const [isLoadingCows, setIsLoadingCows] = useState(false);
 
   // Get user phone number from AsyncStorage
   useEffect(() => {
@@ -45,6 +48,69 @@ export default function CowInfoScreen() {
     };
     getUserPhone();
   }, []);
+
+  // Load cows when entering list mode and userPhone is available
+  useEffect(() => {
+    if (mode === 'listCows' && userPhone) {
+      loadAllCows();
+    }
+  }, [mode, userPhone]);
+
+  // Load all cows when entering list mode
+  const loadAllCows = async () => {
+    if (!userPhone) return;
+    
+    setIsLoadingCows(true);
+    try {
+      const cowsRef = ref(database, 'CowFarm/cows');
+      const allCowsSnapshot = await get(cowsRef);
+      
+      if (allCowsSnapshot.exists()) {
+        const allCowsData = allCowsSnapshot.val();
+        // Filter cows by user phone number
+        const userCows = Object.entries(allCowsData)
+          .filter(([id, cow]) => cow.userPhoneNumber === userPhone)
+          .map(([id, cow]) => ({
+            ...cow,
+            uniqueId: id,
+          }))
+          .sort((a, b) => {
+            // Sort by name alphabetically
+            const nameA = (a.name || '').toLowerCase();
+            const nameB = (b.name || '').toLowerCase();
+            return nameA.localeCompare(nameB);
+          });
+        
+        setAllCows(userCows);
+        setFilteredCows(userCows);
+      } else {
+        setAllCows([]);
+        setFilteredCows([]);
+      }
+    } catch (error) {
+      console.error('Error loading cows:', error);
+      Alert.alert('Error', 'Failed to load cows: ' + error.message);
+      setAllCows([]);
+      setFilteredCows([]);
+    } finally {
+      setIsLoadingCows(false);
+    }
+  };
+
+  // Filter cows based on search query
+  useEffect(() => {
+    if (mode === 'listCows' && searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      const filtered = allCows.filter(cow => 
+        cow.name?.toLowerCase().includes(query) ||
+        cow.uniqueId?.toLowerCase().includes(query) ||
+        cow.breed?.toLowerCase().includes(query)
+      );
+      setFilteredCows(filtered);
+    } else if (mode === 'listCows') {
+      setFilteredCows(allCows);
+    }
+  }, [searchQuery, allCows, mode]);
 
   const dateKey = useMemo(() => {
     const y = selectedDate.getFullYear();
@@ -163,6 +229,17 @@ export default function CowInfoScreen() {
       return;
     }
     await fetchCowData(searchQuery.trim());
+  };
+
+  const handleListCows = () => {
+    setMode('listCows');
+    // loadAllCows will be called by useEffect when mode changes
+  };
+
+  const handleSelectCow = (cow) => {
+    setCowData(cow);
+    setMode('cowSelected');
+    setSearchQuery('');
   };
 
   const handleEnterReport = () => {
@@ -475,6 +552,97 @@ export default function CowInfoScreen() {
     }
   }, [activeTab, data, cowData]);
 
+  // List Cows Screen
+  if (mode === 'listCows') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => {
+            setMode('initial');
+            setSearchQuery('');
+            setFilteredCows([]);
+          }} style={styles.back}>
+            <Ionicons name="arrow-back" size={22} color="#2c3e50" />
+          </TouchableOpacity>
+          <Text style={styles.title}>All Cows</Text>
+          <Text style={styles.subtitle}>{filteredCows.length} cow{filteredCows.length !== 1 ? 's' : ''} found</Text>
+        </View>
+
+        {/* Search Bar */}
+        <View style={styles.listSearchContainer}>
+          <View style={styles.listSearchBox}>
+            <Ionicons name="search" size={20} color="#7f8c8d" style={styles.searchIcon} />
+            <TextInput
+              placeholder="Search by name, ID, or breed..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              style={styles.listSearchInput}
+              autoCapitalize="none"
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={() => setSearchQuery('')}>
+                <Ionicons name="close-circle" size={20} color="#7f8c8d" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Cows List */}
+        {isLoadingCows ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#4CAF50" />
+            <Text style={styles.loadingText}>Loading cows...</Text>
+          </View>
+        ) : filteredCows.length > 0 ? (
+          <ScrollView style={styles.cowsList} contentContainerStyle={styles.cowsListContent}>
+            {filteredCows.map((cow) => (
+              <TouchableOpacity
+                key={cow.uniqueId}
+                style={styles.cowListItem}
+                onPress={() => handleSelectCow(cow)}
+              >
+                <View style={styles.cowListItemIcon}>
+                  <Ionicons name="leaf" size={24} color="#4CAF50" />
+                </View>
+                <View style={styles.cowListItemContent}>
+                  <Text style={styles.cowListItemName}>{cow.name || 'Unnamed'}</Text>
+                  <View style={styles.cowListItemDetails}>
+                    <Text style={styles.cowListItemId}>ID: {cow.uniqueId}</Text>
+                    {cow.breed && (
+                      <Text style={styles.cowListItemBreed}>• {cow.breed}</Text>
+                    )}
+                  </View>
+                  {cow.dob && (
+                    <Text style={styles.cowListItemDob}>DOB: {cow.dob}</Text>
+                  )}
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#7f8c8d" />
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="leaf-outline" size={64} color="#cbd5e1" />
+            <Text style={styles.emptyText}>
+              {searchQuery.trim() 
+                ? 'No cows found matching your search' 
+                : 'No cows registered yet'}
+            </Text>
+            {!searchQuery.trim() && (
+              <TouchableOpacity 
+                style={styles.addCowButton}
+                onPress={() => router.push('/cow-registration')}
+              >
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.addCowButtonText}>Register New Cow</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
   // Initial Screen - Only Scan Option
   if (mode === 'initial') {
     return (
@@ -520,6 +688,18 @@ export default function CowInfoScreen() {
             >
               <Ionicons name="search" size={20} color="#fff" />
               <Text style={styles.searchButtonText}>Search</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.listContainer}>
+            <Text style={styles.orText}>OR</Text>
+            <TouchableOpacity 
+              style={styles.listButton} 
+              onPress={handleListCows}
+              disabled={isLoadingCows}
+            >
+              <Ionicons name="list" size={24} color="#fff" />
+              <Text style={styles.listButtonText}>View All Cows</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -719,8 +899,8 @@ const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 32 },
   header: { marginBottom: 10 },
   back: { padding: 6, alignSelf: 'flex-start' },
-  title: { fontSize: 24, fontWeight: '800', color: '#1f2937', marginTop: 6,paddingLeft:10 },
-  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 2,paddingLeft:10 },
+  title: { fontSize: 24, fontWeight: '800', color: '#1f2937', marginTop: 6, paddingLeft: 10 },
+  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 2, paddingLeft: 10 },
 
   // Initial Screen Styles
   initialContainer: {
@@ -807,6 +987,154 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginLeft: 8,
+  },
+
+  // List View Styles
+  listContainer: {
+    width: '100%',
+    paddingHorizontal: 20,
+    marginTop: 10,
+  },
+  listButton: {
+    backgroundColor: '#2196F3',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#2196F3',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  listButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginLeft: 10,
+  },
+  listSearchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e6e8eb',
+  },
+  listSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#e6e8eb',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  listSearchInput: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#2c3e50',
+  },
+  cowsList: {
+    flex: 1,
+  },
+  cowsListContent: {
+    padding: 16,
+  },
+  cowListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e6e8eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  cowListItemIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#e8f5e8',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cowListItemContent: {
+    flex: 1,
+  },
+  cowListItemName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 4,
+  },
+  cowListItemDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  cowListItemId: {
+    fontSize: 13,
+    color: '#7f8c8d',
+    marginRight: 8,
+  },
+  cowListItemBreed: {
+    fontSize: 13,
+    color: '#7f8c8d',
+  },
+  cowListItemDob: {
+    fontSize: 12,
+    color: '#9aa3a9',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#9aa3a9',
+    textAlign: 'center',
+  },
+  addCowButton: {
+    marginTop: 24,
+    backgroundColor: '#4CAF50',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  addCowButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 
   // Cow Selected Screen

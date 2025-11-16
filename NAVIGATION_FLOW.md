@@ -81,3 +81,4 @@ App Start → Landing → Login/Register → Dashboard → Cows Management
 - **Layout**: Card-based design with shadows and rounded corners
 
 
+
