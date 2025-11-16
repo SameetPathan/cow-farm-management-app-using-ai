@@ -1,5 +1,5 @@
 // Anthropic API Configuration
-const ANTHROPIC_API_KEY = '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';
+const ANTHROPIC_API_KEY = '';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 /**
