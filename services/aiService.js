@@ -1,6 +1,5 @@
 // Anthropic API Configuration
-const ANTHROPIC_API_KEY = '';
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+import { ANTHROPIC_API_KEY, ANTHROPIC_API_URL } from '../config/api';
 
 /**
  * Call Anthropic API directly

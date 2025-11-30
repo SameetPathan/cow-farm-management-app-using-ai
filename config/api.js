@@ -1,3 +1,5 @@
+import Constants from 'expo-constants';
+
 // API Configuration
 const API_BASE_URL = __DEV__ 
   ? 'http://localhost:3000/api'  // Development
@@ -17,6 +19,12 @@ export const API_ENDPOINTS = {
   CHATBOT_HISTORY: `${API_BASE_URL}/chatbot/history`,
   CHATBOT_CLEAR: `${API_BASE_URL}/chatbot/history`,
 };
+
+// Anthropic API Configuration
+// API key is loaded from environment variables via app.config.js
+// Set ANTHROPIC_API_KEY in your .env file
+export const ANTHROPIC_API_KEY = Constants.expoConfig?.extra?.anthropicApiKey || '';
+export const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 export default API_BASE_URL;
 
