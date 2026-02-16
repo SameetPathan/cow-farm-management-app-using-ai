@@ -1,5 +1,5 @@
 // Anthropic API Configuration
-import { ANTHROPIC_API_KEY, ANTHROPIC_API_URL } from '../config/api';
+import { ANTHROPIC_API_KEY, ANTHROPIC_API_URL } from "../config/api";
 
 /**
  * Call Anthropic API directly
@@ -7,14 +7,14 @@ import { ANTHROPIC_API_KEY, ANTHROPIC_API_URL } from '../config/api';
 async function callAnthropicAPI(messages, systemPrompt, maxTokens = 1000) {
   try {
     const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: 'claude-3-opus-20240229',
+        model: "claude-sonnet-4-20250514",
         max_tokens: maxTokens,
         messages: messages,
         system: systemPrompt,
@@ -23,13 +23,15 @@ async function callAnthropicAPI(messages, systemPrompt, maxTokens = 1000) {
 
     if (!response.ok) {
       const errorData = await response.json();
-      throw new Error(`API request failed: ${errorData.error?.message || response.statusText}`);
+      throw new Error(
+        `API request failed: ${errorData.error?.message || response.statusText}`,
+      );
     }
 
     const data = await response.json();
     return data.content[0].text;
   } catch (error) {
-    console.error('Error calling Anthropic API:', error);
+    console.error("Error calling Anthropic API:", error);
     throw error;
   }
 }
@@ -42,9 +44,9 @@ export async function getCowRegistrationAI(cowData) {
     const systemPrompt = `You are an expert dairy farm consultant specializing in cow management. Provide helpful, accurate advice about cow breeds, registration, and initial health tips. Be concise and practical.`;
 
     const userPrompt = `A farmer is registering a new cow with the following details:
-- Name: ${cowData.name || 'Not provided'}
-- Breed: ${cowData.breed || 'Not specified'}
-- Date of Birth: ${cowData.dob || 'Not provided'}
+- Name: ${cowData.name || "Not provided"}
+- Breed: ${cowData.breed || "Not specified"}
+- Date of Birth: ${cowData.dob || "Not provided"}
 
 Provide:
 1. Brief breed information and characteristics (if breed is specified)
@@ -55,7 +57,7 @@ Provide:
 
 Format your response in a clear, structured way with bullet points.`;
 
-    const messages = [{ role: 'user', content: userPrompt }];
+    const messages = [{ role: "user", content: userPrompt }];
     const suggestions = await callAnthropicAPI(messages, systemPrompt, 1000);
 
     return {
@@ -63,7 +65,7 @@ Format your response in a clear, structured way with bullet points.`;
       suggestions: suggestions,
     };
   } catch (error) {
-    console.error('Error getting cow registration AI:', error);
+    console.error("Error getting cow registration AI:", error);
     throw error;
   }
 }
@@ -84,14 +86,14 @@ Cow Details:
 - Date of Birth: ${cowData.dob}
 
 Current Health Data:
-- Weight: ${currentData.weight || 'Not recorded'} kg
-- Height: ${currentData.height || 'Not recorded'} cm
-- Temperature: ${currentData.temperature || 'Not recorded'} °C
-- Milk Yield: ${currentData.milkYield || 'Not recorded'} L/day
-- Food Intake: ${currentData.intakeFood || 'Not recorded'} kg/day
-- Water Intake: ${currentData.intakeWater || 'Not recorded'} L/day
-- Vaccinations: ${currentData.vaccinations || 'None recorded'}
-- Illness History: ${currentData.illnesses || 'None recorded'}
+- Weight: ${currentData.weight || "Not recorded"} kg
+- Height: ${currentData.height || "Not recorded"} cm
+- Temperature: ${currentData.temperature || "Not recorded"} °C
+- Milk Yield: ${currentData.milkYield || "Not recorded"} L/day
+- Food Intake: ${currentData.intakeFood || "Not recorded"} kg/day
+- Water Intake: ${currentData.intakeWater || "Not recorded"} L/day
+- Vaccinations: ${currentData.vaccinations || "None recorded"}
+- Illness History: ${currentData.illnesses || "None recorded"}
 
 Provide:
 1. Health status assessment
@@ -102,7 +104,7 @@ Provide:
 
 Be specific and actionable.`;
 
-    const messages = [{ role: 'user', content: userPrompt }];
+    const messages = [{ role: "user", content: userPrompt }];
     const analysis = await callAnthropicAPI(messages, systemPrompt, 1500);
 
     return {
@@ -110,7 +112,7 @@ Be specific and actionable.`;
       analysis: analysis,
     };
   } catch (error) {
-    console.error('Error getting cow info AI:', error);
+    console.error("Error getting cow info AI:", error);
     throw error;
   }
 }
@@ -128,13 +130,13 @@ Cow: ${cowData.name} (ID: ${cowData.uniqueId})
 Date: ${reportData.date}
 
 Health Status: ${reportData.healthStatus}
-Illness Type: ${reportData.illnessType || 'N/A'}
-Symptoms: ${reportData.symptoms || 'None'}
-Temperature: ${reportData.temperature || 'Not recorded'} °F
-Appetite: ${reportData.appetite || 'Not recorded'}
-Medication: ${reportData.medication || 'None'}
-Veterinarian Visit: ${reportData.veterinarianVisit ? 'Yes' : 'No'}
-Notes: ${reportData.notes || 'None'}
+Illness Type: ${reportData.illnessType || "N/A"}
+Symptoms: ${reportData.symptoms || "None"}
+Temperature: ${reportData.temperature || "Not recorded"} °F
+Appetite: ${reportData.appetite || "Not recorded"}
+Medication: ${reportData.medication || "None"}
+Veterinarian Visit: ${reportData.veterinarianVisit ? "Yes" : "No"}
+Notes: ${reportData.notes || "None"}
 
 Provide:
 1. Health assessment and any concerns
@@ -145,7 +147,7 @@ Provide:
 
 Be concise and prioritize urgent issues.`;
 
-    const messages = [{ role: 'user', content: userPrompt }];
+    const messages = [{ role: "user", content: userPrompt }];
     const analysis = await callAnthropicAPI(messages, systemPrompt, 1500);
 
     return {
@@ -154,7 +156,7 @@ Be concise and prioritize urgent issues.`;
       recommendations: analysis,
     };
   } catch (error) {
-    console.error('Error getting daily reports AI:', error);
+    console.error("Error getting daily reports AI:", error);
     throw error;
   }
 }
@@ -168,7 +170,10 @@ export async function getMilkProductionAI(cowData, milkData) {
 
     const morning = milkData.morning || {};
     const evening = milkData.evening || {};
-    const total = (parseFloat(morning.milkQuantity || 0) + parseFloat(evening.milkQuantity || 0)).toFixed(1);
+    const total = (
+      parseFloat(morning.milkQuantity || 0) +
+      parseFloat(evening.milkQuantity || 0)
+    ).toFixed(1);
 
     const userPrompt = `Analyze milk production data for a cow:
 
@@ -176,14 +181,14 @@ Cow: ${cowData.name} (ID: ${cowData.uniqueId})
 Date: ${milkData.date}
 
 Morning Session:
-- Quantity: ${morning.milkQuantity || '0'} liters
-- Quality: ${morning.milkQuality || 'Not recorded'}
-- Temperature: ${morning.temperature || 'Not recorded'} °C
+- Quantity: ${morning.milkQuantity || "0"} liters
+- Quality: ${morning.milkQuality || "Not recorded"}
+- Temperature: ${morning.temperature || "Not recorded"} °C
 
 Evening Session:
-- Quantity: ${evening.milkQuantity || '0'} liters
-- Quality: ${evening.milkQuality || 'Not recorded'}
-- Temperature: ${evening.temperature || 'Not recorded'} °C
+- Quantity: ${evening.milkQuantity || "0"} liters
+- Quality: ${evening.milkQuality || "Not recorded"}
+- Temperature: ${evening.temperature || "Not recorded"} °C
 
 Daily Total: ${total} liters
 
@@ -196,7 +201,7 @@ Provide:
 
 Be practical and data-driven.`;
 
-    const messages = [{ role: 'user', content: userPrompt }];
+    const messages = [{ role: "user", content: userPrompt }];
     const analysis = await callAnthropicAPI(messages, systemPrompt, 1500);
 
     return {
@@ -205,7 +210,7 @@ Be practical and data-driven.`;
       predictions: analysis,
     };
   } catch (error) {
-    console.error('Error getting milk production AI:', error);
+    console.error("Error getting milk production AI:", error);
     throw error;
   }
 }
@@ -213,7 +218,7 @@ Be practical and data-driven.`;
 /**
  * Call AI for expenses analysis
  */
-export async function getExpensesAI(expenseData, period = 'daily') {
+export async function getExpensesAI(expenseData, period = "daily") {
   try {
     const systemPrompt = `You are a farm financial advisor specializing in dairy operations. Analyze expenses, identify cost-saving opportunities, and provide budget optimization recommendations.`;
 
@@ -224,7 +229,7 @@ Food/Feed Costs: ₹${expenseData.feed || 0}
 Doctor/Veterinary Fees: ₹${expenseData.doctor || 0}
 Other Expenses: ₹${expenseData.other || 0}
 Total: ₹${(parseFloat(expenseData.feed || 0) + parseFloat(expenseData.doctor || 0) + parseFloat(expenseData.other || 0)).toFixed(2)}
-Notes: ${expenseData.notes || 'None'}
+Notes: ${expenseData.notes || "None"}
 
 Provide:
 1. Cost analysis and breakdown
@@ -235,7 +240,7 @@ Provide:
 
 Focus on practical, actionable advice.`;
 
-    const messages = [{ role: 'user', content: userPrompt }];
+    const messages = [{ role: "user", content: userPrompt }];
     const analysis = await callAnthropicAPI(messages, systemPrompt, 1500);
 
     return {
@@ -244,7 +249,7 @@ Focus on practical, actionable advice.`;
       suggestions: analysis,
     };
   } catch (error) {
-    console.error('Error getting expenses AI:', error);
+    console.error("Error getting expenses AI:", error);
     throw error;
   }
 }
@@ -256,7 +261,7 @@ export async function getReportsAI(reportData) {
   try {
     const systemPrompt = `You are a dairy farm analytics expert. Analyze comprehensive farm data, identify trends, calculate profit/loss, and provide strategic insights for farm management.`;
 
-    const userPrompt = `Analyze comprehensive farm data for a ${reportData.period || '30-day'} period:
+    const userPrompt = `Analyze comprehensive farm data for a ${reportData.period || "30-day"} period:
 
 Total Milk Production: ${reportData.totalMilkProduction || 0} liters
 Total Expenses: ₹${reportData.totalExpenses || 0}
@@ -266,7 +271,7 @@ Healthy Cows: ${reportData.healthyCows || 0}
 Sick Cows: ${reportData.sickCows || 0}
 
 Additional Context:
-${reportData.additionalData || 'None'}
+${reportData.additionalData || "None"}
 
 Provide:
 1. Overall farm performance assessment
@@ -279,7 +284,7 @@ Provide:
 
 Be comprehensive but clear.`;
 
-    const messages = [{ role: 'user', content: userPrompt }];
+    const messages = [{ role: "user", content: userPrompt }];
     const analysis = await callAnthropicAPI(messages, systemPrompt, 2000);
 
     return {
@@ -288,8 +293,7 @@ Be comprehensive but clear.`;
       insights: analysis,
     };
   } catch (error) {
-    console.error('Error getting reports AI:', error);
+    console.error("Error getting reports AI:", error);
     throw error;
   }
 }
-

@@ -1,54 +1,63 @@
-import React, { useState, useEffect } from 'react';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
+import { child, get, ref } from "firebase/database";
+import { useEffect, useRef, useState } from "react";
 import {
-  View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  Alert,
-  Animated,
-} from 'react-native';
-import { router } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { database } from '../firebaseConfig';
-import { ref, get, child } from 'firebase/database';
+  View,
+} from "react-native";
+import LanguageSelector from "../components/LanguageSelector";
+import { useLanguage } from "../contexts/LanguageContext";
+import { database } from "../firebaseConfig";
 
 export default function LoginScreen() {
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [password, setPassword] = useState('');
+  const { t } = useLanguage();
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [fadeAnim] = useState(new Animated.Value(0));
-  const [slideAnim] = useState(new Animated.Value(50));
+
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fadeAnim, {
+      Animated.spring(fadeAnim, {
         toValue: 1,
-        duration: 1000,
         useNativeDriver: true,
+        tension: 60,
+        friction: 9,
       }),
-      Animated.timing(slideAnim, {
+      Animated.spring(slideAnim, {
         toValue: 0,
-        duration: 800,
         useNativeDriver: true,
+        tension: 60,
+        friction: 9,
       }),
     ]).start();
   }, []);
 
   const validateForm = () => {
     if (!phoneNumber || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert(t("common.error"), t("login.fillAllFields"));
       return false;
     }
-    // Phone number validation (10 digits)
     const phoneRegex = /^\d{10}$/;
     if (!phoneRegex.test(phoneNumber)) {
-      Alert.alert('Error', 'Please enter a valid 10-digit phone number');
+      Alert.alert(t("common.error"), t("login.validPhone"));
       return false;
     }
     return true;
@@ -56,184 +65,339 @@ export default function LoginScreen() {
 
   const handleLogin = () => {
     if (!validateForm()) return;
-
     setIsLoading(true);
 
-    // Check if user exists in the database with the provided phone number
     const dbRef = ref(database);
     get(child(dbRef, `CowFarm/users/${phoneNumber}`))
       .then((snapshot) => {
         setIsLoading(false);
-        
         if (snapshot.exists()) {
           const userData = snapshot.val();
-          
-          // Verify password
           if (userData.password === password) {
-            // Store login info in AsyncStorage
-            AsyncStorage.setItem('userPhone', phoneNumber)
+            AsyncStorage.setItem("userPhone", phoneNumber)
               .then(() => {
-                Alert.alert('Success', 'Login successful!', [
-                  { 
-                    text: 'OK', 
-                    onPress: () => router.replace('/home')
-                  }
+                Alert.alert(t("common.success"), t("login.loginSuccess"), [
+                  {
+                    text: t("common.ok"),
+                    onPress: () => router.replace("/home"),
+                  },
                 ]);
               })
               .catch((error) => {
-                Alert.alert('Error', 'Failed to save login status: ' + error.message);
+                Alert.alert(
+                  t("common.error"),
+                  t("login.loginFailed") + ": " + error.message,
+                );
               });
           } else {
-            Alert.alert('Error', 'Incorrect password');
+            Alert.alert(t("common.error"), t("login.incorrectPassword"));
           }
         } else {
-          Alert.alert('Error', 'User not found. Please register first.');
+          Alert.alert(t("common.error"), t("login.userNotFound"));
         }
       })
       .catch((error) => {
         setIsLoading(false);
-        Alert.alert('Error', 'Login failed: ' + error.message);
+        Alert.alert(
+          t("common.error"),
+          t("login.loginFailed") + ": " + error.message,
+        );
       });
   };
 
-  const navigateToRegister = () => {
-    router.push('/register');
+  const animStyle = {
+    opacity: fadeAnim,
+    transform: [{ translateY: slideAnim }],
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <Animated.View
-          style={[
-            styles.content,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
+    <LinearGradient
+      colors={["#0f1923", "#142233", "#0d1f2d"]}
+      style={styles.gradient}
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
+      <SafeAreaView style={styles.safeArea}>
+        {/* Language Selector */}
+        <View style={styles.langWrap}>
+          <LanguageSelector />
+        </View>
+
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.keyboardView}
         >
-          <View style={styles.header}>
-            <View style={styles.iconContainer}>
-              <Ionicons name="leaf" size={60} color="#4CAF50" />
-            </View>
-            <Text style={styles.title}>Cow Farm Management</Text>
-            <Text style={styles.subtitle}>Welcome Back!</Text>
-          </View>
-
-          <View style={styles.form}>
-            <View style={styles.inputContainer}>
-              <Ionicons name="call" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Phone Number"
-                value={phoneNumber}
-                onChangeText={setPhoneNumber}
-                keyboardType="phone-pad"
-                placeholderTextColor="#999"
-              />
+          <Animated.View style={[styles.content, animStyle]}>
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.iconBadge}>
+                <LinearGradient
+                  colors={["rgba(34,197,94,0.2)", "rgba(34,197,94,0.1)"]}
+                  style={styles.iconGradient}
+                >
+                  <Ionicons name="leaf" size={56} color="#22c55e" />
+                </LinearGradient>
+              </View>
+              <Text style={styles.title}>{t("login.title")}</Text>
+              <Text style={styles.subtitle}>{t("login.subtitle")}</Text>
             </View>
 
-            <View style={styles.inputContainer}>
-              <Ionicons name="lock-closed" size={20} color="#666" style={styles.inputIcon} />
-              <TextInput
-                style={styles.input}
-                placeholder="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                placeholderTextColor="#999"
-              />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeIcon}>
-                <Ionicons name={showPassword ? 'eye-off' : 'eye'} size={20} color="#666" />
+            {/* Form */}
+            <View style={styles.form}>
+              {/* Phone Number Input */}
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>{t("login.phoneNumber")}</Text>
+                <LinearGradient
+                  colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.04)"]}
+                  style={styles.inputContainer}
+                >
+                  <Ionicons
+                    name="call"
+                    size={20}
+                    color="#22c55e"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="10-digit phone number"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    value={phoneNumber}
+                    onChangeText={setPhoneNumber}
+                    keyboardType="phone-pad"
+                    maxLength={10}
+                  />
+                </LinearGradient>
+              </View>
+
+              {/* Password Input */}
+              <View style={styles.inputWrapper}>
+                <Text style={styles.label}>{t("login.password")}</Text>
+                <LinearGradient
+                  colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.04)"]}
+                  style={styles.inputContainer}
+                >
+                  <Ionicons
+                    name="lock-closed"
+                    size={20}
+                    color="#22c55e"
+                    style={styles.inputIcon}
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your password"
+                    placeholderTextColor="rgba(255,255,255,0.3)"
+                    value={password}
+                    onChangeText={setPassword}
+                    secureTextEntry={!showPassword}
+                  />
+                  <TouchableOpacity
+                    onPress={() => setShowPassword(!showPassword)}
+                    style={styles.eyeBtn}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons
+                      name={showPassword ? "eye-off" : "eye"}
+                      size={20}
+                      color="rgba(255,255,255,0.5)"
+                    />
+                  </TouchableOpacity>
+                </LinearGradient>
+              </View>
+
+              {/* Login Button */}
+              <TouchableOpacity
+                style={styles.loginBtn}
+                onPress={handleLogin}
+                disabled={isLoading}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={["#22c55e", "#16a34a"]}
+                  style={styles.loginGradient}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Text style={styles.loginText}>{t("login.login")}</Text>
+                      <Ionicons name="arrow-forward" size={20} color="#fff" />
+                    </>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity 
-              style={[styles.loginButton, isLoading && styles.loginButtonDisabled]} 
-              onPress={handleLogin}
-              disabled={isLoading}
-            >
-              <Text style={styles.loginButtonText}>
-                {isLoading ? 'Signing in...' : 'Login'}
-              </Text>
-              {!isLoading && <Ionicons name="arrow-forward" size={20} color="white" />}
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>Don't have an account? </Text>
-            <TouchableOpacity onPress={navigateToRegister}>
-              <Text style={styles.registerLink}>Register</Text>
-            </TouchableOpacity>
-          </View>
-        </Animated.View>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+            {/* Footer */}
+            <View style={styles.footer}>
+              <LinearGradient
+                colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.04)"]}
+                style={styles.footerGradient}
+              >
+                <Text style={styles.footerText}>
+                  {t("login.dontHaveAccount")}
+                </Text>
+                <TouchableOpacity
+                  onPress={() => router.push("/register")}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.registerLink}>{t("login.register")}</Text>
+                </TouchableOpacity>
+              </LinearGradient>
+            </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
-  keyboardView: { flex: 1 },
-  content: { flex: 1, paddingHorizontal: 30, justifyContent: 'center' },
-  header: { alignItems: 'center', marginBottom: 50 },
-  iconContainer: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: '#e8f5e8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+  gradient: { flex: 1 },
+  safeArea: {
+    flex: 1,
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
   },
-  title: { fontSize: 28, fontWeight: 'bold', color: '#2c3e50', marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 16, color: '#7f8c8d', textAlign: 'center' },
-  form: { marginBottom: 30 },
+
+  langWrap: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 52 : (StatusBar.currentHeight || 0) + 12,
+    right: 16,
+    zIndex: 1000,
+  },
+
+  keyboardView: {
+    flex: 1,
+    justifyContent: "center",
+  },
+
+  content: {
+    paddingHorizontal: 24,
+  },
+
+  // Header
+  header: {
+    alignItems: "center",
+    marginBottom: 40,
+  },
+  iconBadge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    marginBottom: 24,
+    overflow: "hidden",
+    borderWidth: 3,
+    borderColor: "rgba(34,197,94,0.3)",
+  },
+  iconGradient: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: "800",
+    color: "#fff",
+    marginBottom: 8,
+    textAlign: "center",
+    letterSpacing: 0.5,
+  },
+  subtitle: {
+    fontSize: 15,
+    color: "rgba(255,255,255,0.6)",
+    textAlign: "center",
+    fontWeight: "500",
+  },
+
+  // Form
+  form: {
+    marginBottom: 28,
+  },
+  inputWrapper: {
+    marginBottom: 20,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.5)",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginBottom: 8,
+    marginLeft: 4,
+  },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
+    flexDirection: "row",
+    alignItems: "center",
     borderRadius: 12,
-    marginBottom: 20,
-    paddingHorizontal: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  inputIcon: { marginRight: 10 },
-  input: { flex: 1, paddingVertical: 15, fontSize: 16, color: '#2c3e50' },
-  eyeIcon: { padding: 5 },
-  loginButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    paddingVertical: 15,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 10,
-    shadowColor: '#4CAF50',
+  inputIcon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#fff",
+    fontWeight: "500",
+  },
+  eyeBtn: {
+    padding: 8,
+  },
+
+  loginBtn: {
+    borderRadius: 14,
+    marginTop: 8,
+    overflow: "hidden",
+    shadowColor: "#22c55e",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
     elevation: 8,
   },
-  loginButtonDisabled: {
-    opacity: 0.6,
+  loginGradient: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 16,
   },
-  loginButtonText: { color: 'white', fontSize: 18, fontWeight: 'bold', marginRight: 10 },
-  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  footerText: { color: '#7f8c8d', fontSize: 16 },
-  registerLink: { color: '#4CAF50', fontSize: 16, fontWeight: 'bold' },
+  loginText: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+
+  // Footer
+  footer: {
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  footerGradient: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+  },
+  footerText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  registerLink: {
+    color: "#22c55e",
+    fontSize: 14,
+    fontWeight: "700",
+  },
 });
-
-

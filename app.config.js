@@ -37,7 +37,6 @@ module.exports = {
           backgroundColor: '#ffffff',
         },
       ],
-      './plugins/withFixedMainApplication',
     ],
     experiments: {
       typedRoutes: true,

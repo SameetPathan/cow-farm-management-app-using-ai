@@ -1,95 +1,132 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, Modal, ActivityIndicator } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { database } from '../firebaseConfig';
-import { ref, get, set, child } from 'firebase/database';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
+import { child, get, ref, set } from "firebase/database";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  FlatList,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import LanguageSelector from "../components/LanguageSelector";
+import { useLanguage } from "../contexts/LanguageContext";
+import { database } from "../firebaseConfig";
 
-const TABS = ['Overview', 'Vitals', 'Production', 'Intake', 'Health'];
-
+// ─── Tab button ──────────────────────────────────────────────────────────────
 function TabButton({ label, active, onPress }) {
   return (
-    <TouchableOpacity onPress={onPress} style={[styles.tabButton, active && styles.tabButtonActive]}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.tabBtn, active && styles.tabBtnActive]}
+      activeOpacity={0.8}
+    >
+      <Text
+        style={[styles.tabText, active && styles.tabTextActive]}
+        numberOfLines={1}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
 
 export default function CowInfoScreen() {
-  const [mode, setMode] = useState('initial'); // 'initial', 'listCows', 'cowSelected', 'enterReport', 'viewDetails'
-  const [activeTab, setActiveTab] = useState('Overview');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [cowData, setCowData] = useState(null); // Cow registration data
-  const [records, setRecords] = useState({}); // { 'YYYY-MM-DD': { ...fields } }
+  const { t } = useLanguage();
+  const [mode, setMode] = useState("initial");
+  const [activeTab, setActiveTab] = useState("Overview");
+  const TABS = [
+    { key: "Overview", label: t("cowInfo.overview") },
+    { key: "Vitals", label: t("cowInfo.vitals") },
+    { key: "Production", label: t("cowInfo.production") },
+    { key: "Intake", label: t("cowInfo.intake") },
+    { key: "Health", label: t("cowInfo.health") },
+  ];
+  const [searchQuery, setSearchQuery] = useState("");
+  const [cowData, setCowData] = useState(null);
+  const [records, setRecords] = useState({});
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [scanVisible, setScanVisible] = useState(false);
   const [datePickerVisible, setDatePickerVisible] = useState(false);
   const [tempSelectedDate, setTempSelectedDate] = useState(new Date());
   const [permission, requestPermission] = useCameraPermissions();
   const [isLoading, setIsLoading] = useState(false);
-  const [userPhone, setUserPhone] = useState('');
-  const [allCows, setAllCows] = useState([]); // List of all cows
-  const [filteredCows, setFilteredCows] = useState([]); // Filtered cows for search
+  const [userPhone, setUserPhone] = useState("");
+  const [allCows, setAllCows] = useState([]);
+  const [filteredCows, setFilteredCows] = useState([]);
   const [isLoadingCows, setIsLoadingCows] = useState(false);
 
-  // Get user phone number from AsyncStorage
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+
   useEffect(() => {
-    const getUserPhone = async () => {
-      try {
-        const phone = await AsyncStorage.getItem('userPhone');
-        if (phone) {
-          setUserPhone(phone);
-        }
-      } catch (error) {
-        console.error('Error getting user phone:', error);
-      }
-    };
-    getUserPhone();
+    Animated.parallel([
+      Animated.spring(fadeAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 60,
+        friction: 9,
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 60,
+        friction: 9,
+      }),
+    ]).start();
+  }, [mode]);
+
+  useEffect(() => {
+    AsyncStorage.getItem("userPhone")
+      .then((phone) => {
+        if (phone) setUserPhone(phone);
+      })
+      .catch(console.error);
   }, []);
 
-  // Load cows when entering list mode and userPhone is available
   useEffect(() => {
-    if (mode === 'listCows' && userPhone) {
-      loadAllCows();
-    }
+    if (mode === "listCows" && userPhone) loadAllCows();
   }, [mode, userPhone]);
 
-  // Load all cows when entering list mode
   const loadAllCows = async () => {
     if (!userPhone) return;
-    
     setIsLoadingCows(true);
     try {
-      const cowsRef = ref(database, 'CowFarm/cows');
-      const allCowsSnapshot = await get(cowsRef);
-      
-      if (allCowsSnapshot.exists()) {
-        const allCowsData = allCowsSnapshot.val();
-        // Filter cows by user phone number
-        const userCows = Object.entries(allCowsData)
-          .filter(([id, cow]) => cow.userPhoneNumber === userPhone)
-          .map(([id, cow]) => ({
-            ...cow,
-            uniqueId: id,
-          }))
-          .sort((a, b) => {
-            // Sort by name alphabetically
-            const nameA = (a.name || '').toLowerCase();
-            const nameB = (b.name || '').toLowerCase();
-            return nameA.localeCompare(nameB);
-          });
-        
+      const snapshot = await get(ref(database, "CowFarm/cows"));
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        const userCows = Object.entries(data)
+          .filter(([, c]) => c.userPhoneNumber === userPhone)
+          .map(([id, c]) => ({ ...c, uniqueId: id }))
+          .sort((a, b) =>
+            (a.name || "")
+              .toLowerCase()
+              .localeCompare((b.name || "").toLowerCase()),
+          );
         setAllCows(userCows);
         setFilteredCows(userCows);
       } else {
         setAllCows([]);
         setFilteredCows([]);
       }
-    } catch (error) {
-      console.error('Error loading cows:', error);
-      Alert.alert('Error', 'Failed to load cows: ' + error.message);
+    } catch (e) {
+      Alert.alert(
+        t("common.error"),
+        t("cowInfo.failedToLoadCows") + ": " + e.message,
+      );
       setAllCows([]);
       setFilteredCows([]);
     } finally {
@@ -97,122 +134,101 @@ export default function CowInfoScreen() {
     }
   };
 
-  // Filter cows based on search query
   useEffect(() => {
-    if (mode === 'listCows' && searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      const filtered = allCows.filter(cow => 
-        cow.name?.toLowerCase().includes(query) ||
-        cow.uniqueId?.toLowerCase().includes(query) ||
-        cow.breed?.toLowerCase().includes(query)
+    if (mode === "listCows") {
+      const q = searchQuery.toLowerCase();
+      setFilteredCows(
+        q
+          ? allCows.filter(
+              (c) =>
+                c.name?.toLowerCase().includes(q) ||
+                c.uniqueId?.toLowerCase().includes(q) ||
+                c.breed?.toLowerCase().includes(q),
+            )
+          : allCows,
       );
-      setFilteredCows(filtered);
-    } else if (mode === 'listCows') {
-      setFilteredCows(allCows);
     }
   }, [searchQuery, allCows, mode]);
 
   const dateKey = useMemo(() => {
     const y = selectedDate.getFullYear();
-    const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
-    const d = String(selectedDate.getDate()).padStart(2, '0');
+    const m = String(selectedDate.getMonth() + 1).padStart(2, "0");
+    const d = String(selectedDate.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
   }, [selectedDate]);
 
   const todayKey = useMemo(() => {
     const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    return `${y}-${m}-${d}`;
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   }, []);
 
   const data = records[dateKey] || null;
 
-  const formatPrettyDate = (date) => {
-    return date.toLocaleDateString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' });
-  };
+  const formatPrettyDate = (date) =>
+    date.toLocaleDateString(undefined, {
+      weekday: "short",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
 
-  const formatDate = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
+  const formatDate = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 
-  // Fetch cow data from Firebase by ID or name
   const fetchCowData = async (searchValue) => {
     setIsLoading(true);
     try {
       const dbRef = ref(database);
-      
-      // Try to find by uniqueId first
-      const cowSnapshot = await get(child(dbRef, `CowFarm/cows/${searchValue}`));
-      
+      const cowSnapshot = await get(
+        child(dbRef, `CowFarm/cows/${searchValue}`),
+      );
       if (cowSnapshot.exists()) {
-        const cow = cowSnapshot.val();
-        setCowData({ ...cow, uniqueId: searchValue });
-        setMode('cowSelected');
+        setCowData({ ...cowSnapshot.val(), uniqueId: searchValue });
+        setMode("cowSelected");
         setIsLoading(false);
         return true;
       }
-
-      // If not found by ID, search by name (need to query all cows)
-      const cowsRef = ref(database, 'CowFarm/cows');
-      const allCowsSnapshot = await get(cowsRef);
-      
-      if (allCowsSnapshot.exists()) {
-        const allCows = allCowsSnapshot.val();
-        const foundCow = Object.entries(allCows).find(([id, cow]) => 
-          cow.name && cow.name.toLowerCase().includes(searchValue.toLowerCase())
+      const allSnapshot = await get(ref(database, "CowFarm/cows"));
+      if (allSnapshot.exists()) {
+        const found = Object.entries(allSnapshot.val()).find(
+          ([, c]) =>
+            c.name && c.name.toLowerCase().includes(searchValue.toLowerCase()),
         );
-        
-        if (foundCow) {
-          const [id, cow] = foundCow;
-          setCowData({ ...cow, uniqueId: id });
-          setMode('cowSelected');
+        if (found) {
+          const [id, c] = found;
+          setCowData({ ...c, uniqueId: id });
+          setMode("cowSelected");
           setIsLoading(false);
           return true;
         }
       }
-
-      Alert.alert('Not Found', 'Cow not found. Please check the ID or name and try again.');
+      Alert.alert(t("common.error"), t("cowInfo.cowNotFound"));
       setIsLoading(false);
       return false;
-    } catch (error) {
-      console.error('Error fetching cow data:', error);
-      Alert.alert('Error', 'Failed to fetch cow data: ' + error.message);
+    } catch (e) {
+      Alert.alert(
+        t("common.error"),
+        t("cowInfo.failedToFetchCowData") + ": " + e.message,
+      );
       setIsLoading(false);
       return false;
     }
   };
 
-  // Load daily report for selected date
   const loadDailyReport = async (date) => {
-    if (!cowData || !cowData.uniqueId) return;
-    
+    if (!cowData?.uniqueId) return;
     setIsLoading(true);
     try {
-      const dbRef = ref(database);
-      const reportPath = `CowFarm/reports/${cowData.uniqueId}/${date}`;
-      const reportSnapshot = await get(child(dbRef, reportPath));
-      
-      if (reportSnapshot.exists()) {
-        const report = reportSnapshot.val();
-        setRecords(prev => ({
-          ...prev,
-          [date]: report
-        }));
-      } else {
-        // Initialize empty record for this date
-        setRecords(prev => ({
-          ...prev,
-          [date]: {}
-        }));
-      }
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Error loading daily report:', error);
+      const reportSnapshot = await get(
+        child(ref(database), `CowFarm/reports/${cowData.uniqueId}/${date}`),
+      );
+      setRecords((prev) => ({
+        ...prev,
+        [date]: reportSnapshot.exists() ? reportSnapshot.val() : {},
+      }));
+    } catch (e) {
+      console.error(e);
+    } finally {
       setIsLoading(false);
     }
   };
@@ -222,53 +238,39 @@ export default function CowInfoScreen() {
     setSearchQuery(data);
     fetchCowData(data);
   };
-
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
-      Alert.alert('Enter Search', 'Please scan QR code or enter cow ID/name');
+      Alert.alert(t("common.error"), t("cowInfo.enterSearch"));
       return;
     }
     await fetchCowData(searchQuery.trim());
   };
-
-  const handleListCows = () => {
-    setMode('listCows');
-    // loadAllCows will be called by useEffect when mode changes
-  };
-
+  const handleListCows = () => setMode("listCows");
   const handleSelectCow = (cow) => {
     setCowData(cow);
-    setMode('cowSelected');
-    setSearchQuery('');
+    setMode("cowSelected");
+    setSearchQuery("");
   };
-
   const handleEnterReport = () => {
     setSelectedDate(new Date());
-    setMode('enterReport');
+    setMode("enterReport");
     loadDailyReport(todayKey);
   };
-
   const handleViewDetails = () => {
-    setMode('viewDetails');
+    setMode("viewDetails");
     loadDailyReport(dateKey);
   };
-
-  const updateRecord = (field, value) => {
+  const updateRecord = (field, value) =>
     setRecords((prev) => ({
       ...prev,
-      [dateKey]: {
-        ...(prev[dateKey] || {}),
-        [field]: value,
-      },
+      [dateKey]: { ...(prev[dateKey] || {}), [field]: value },
     }));
-  };
 
   const handleSave = async () => {
-    if (!cowData || !cowData.uniqueId) {
-      Alert.alert('Error', 'Cow data not found');
+    if (!cowData?.uniqueId) {
+      Alert.alert(t("common.error"), t("cowInfo.cowDataNotFound"));
       return;
     }
-
     setIsLoading(true);
     try {
       const reportData = {
@@ -277,151 +279,154 @@ export default function CowInfoScreen() {
         cowName: cowData.name,
         date: dateKey,
         updatedAt: new Date().toISOString(),
-        userPhoneNumber: userPhone
+        userPhoneNumber: userPhone,
       };
-
-      const dbRef = ref(database);
-      const reportPath = `CowFarm/reports/${cowData.uniqueId}/${dateKey}`;
-      await set(child(dbRef, reportPath), reportData);
-
-      Alert.alert('Success', `Report saved for ${formatPrettyDate(selectedDate)}`, [
-        { text: 'OK', onPress: () => setMode('cowSelected') }
-      ]);
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Error saving report:', error);
-      Alert.alert('Error', 'Failed to save report: ' + error.message);
+      await set(
+        child(ref(database), `CowFarm/reports/${cowData.uniqueId}/${dateKey}`),
+        reportData,
+      );
+      Alert.alert(
+        t("common.success"),
+        t("cowInfo.reportSaved") + " " + formatPrettyDate(selectedDate),
+        [{ text: t("common.ok"), onPress: () => setMode("cowSelected") }],
+      );
+    } catch (e) {
+      Alert.alert(
+        t("common.error"),
+        t("cowInfo.failedToSaveReport") + ": " + e.message,
+      );
+    } finally {
       setIsLoading(false);
     }
   };
 
   const goPrevDay = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() - 1);
-    setSelectedDate(newDate);
-    loadDailyReport(formatDate(newDate));
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() - 1);
+    setSelectedDate(d);
+    loadDailyReport(formatDate(d));
   };
-
   const goNextDay = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + 1);
-    setSelectedDate(newDate);
-    loadDailyReport(formatDate(newDate));
+    const d = new Date(selectedDate);
+    d.setDate(d.getDate() + 1);
+    setSelectedDate(d);
+    loadDailyReport(formatDate(d));
   };
-
   const goToday = () => {
-    const now = new Date();
-    setSelectedDate(now);
+    const d = new Date();
+    setSelectedDate(d);
     loadDailyReport(todayKey);
   };
-
-  const handleDateSelect = () => {
-    setSelectedDate(new Date(tempSelectedDate));
-    const dateStr = formatDate(tempSelectedDate);
-    loadDailyReport(dateStr);
-    setDatePickerVisible(false);
-  };
-
   const openDatePicker = () => {
     setTempSelectedDate(new Date(selectedDate));
     setDatePickerVisible(true);
   };
-
-  const getDaysInMonth = (date) => {
-    return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const handleDateSelect = () => {
+    setSelectedDate(new Date(tempSelectedDate));
+    loadDailyReport(formatDate(tempSelectedDate));
+    setDatePickerVisible(false);
   };
 
-  const getFirstDayOfMonth = (date) => {
-    return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
-  };
+  // Calendar helpers
+  const getDaysInMonth = (date) =>
+    new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const getFirstDayOfMonth = (date) =>
+    new Date(date.getFullYear(), date.getMonth(), 1).getDay();
 
   const renderCalendar = () => {
     const daysInMonth = getDaysInMonth(tempSelectedDate);
     const firstDay = getFirstDayOfMonth(tempSelectedDate);
-    const days = [];
-    
-    // Add empty cells for days before the first day of the month
-    for (let i = 0; i < firstDay; i++) {
-      days.push(null);
-    }
-    
-    // Add days of the month
-    for (let day = 1; day <= daysInMonth; day++) {
-      days.push(day);
-    }
-    
-    const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 
-                   'July', 'August', 'September', 'October', 'November', 'December'];
-    
+    const days = [
+      ...Array(firstDay).fill(null),
+      ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+    ];
+    const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const months = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+    const changeMonth = (delta) => {
+      const d = new Date(tempSelectedDate);
+      d.setMonth(d.getMonth() + delta);
+      setTempSelectedDate(d);
+    };
+
     return (
-      <View style={styles.calendarContainer}>
-        <View style={styles.calendarHeader}>
-          <TouchableOpacity 
-            onPress={() => {
-              const newDate = new Date(tempSelectedDate);
-              newDate.setMonth(newDate.getMonth() - 1);
-              setTempSelectedDate(newDate);
-            }}
-            style={styles.calendarNavButton}
+      <View style={styles.calWrap}>
+        <View style={styles.calHeader}>
+          <TouchableOpacity
+            onPress={() => changeMonth(-1)}
+            style={styles.calNavBtn}
           >
-            <Ionicons name="chevron-back" size={20} color="#2c3e50" />
+            <Ionicons
+              name="chevron-back"
+              size={18}
+              color="rgba(255,255,255,0.7)"
+            />
           </TouchableOpacity>
-          
-          <Text style={styles.calendarMonthText}>
-            {months[tempSelectedDate.getMonth()]} {tempSelectedDate.getFullYear()}
+          <Text style={styles.calMonth}>
+            {months[tempSelectedDate.getMonth()]}{" "}
+            {tempSelectedDate.getFullYear()}
           </Text>
-          
-          <TouchableOpacity 
-            onPress={() => {
-              const newDate = new Date(tempSelectedDate);
-              newDate.setMonth(newDate.getMonth() + 1);
-              setTempSelectedDate(newDate);
-            }}
-            style={styles.calendarNavButton}
+          <TouchableOpacity
+            onPress={() => changeMonth(1)}
+            style={styles.calNavBtn}
           >
-            <Ionicons name="chevron-forward" size={20} color="#2c3e50" />
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color="rgba(255,255,255,0.7)"
+            />
           </TouchableOpacity>
         </View>
-        
-        <View style={styles.weekDaysRow}>
-          {weekDays.map((day) => (
-            <View key={day} style={styles.weekDayCell}>
-              <Text style={styles.weekDayText}>{day}</Text>
+        <View style={styles.calWeekRow}>
+          {weekDays.map((d) => (
+            <View key={d} style={styles.calWeekCell}>
+              <Text style={styles.calWeekText}>{d}</Text>
             </View>
           ))}
         </View>
-        
-        <View style={styles.calendarGrid}>
-          {days.map((day, index) => {
-            if (day === null) {
-              return <View key={index} style={styles.calendarCell} />;
-            }
-            
+        <View style={styles.calGrid}>
+          {days.map((day, i) => {
+            if (!day) return <View key={i} style={styles.calCell} />;
             const isSelected = day === tempSelectedDate.getDate();
-            const isToday = day === new Date().getDate() &&
-                           tempSelectedDate.getMonth() === new Date().getMonth() &&
-                           tempSelectedDate.getFullYear() === new Date().getFullYear();
-            
+            const now = new Date();
+            const isToday =
+              day === now.getDate() &&
+              tempSelectedDate.getMonth() === now.getMonth() &&
+              tempSelectedDate.getFullYear() === now.getFullYear();
             return (
               <TouchableOpacity
-                key={index}
+                key={i}
                 style={[
-                  styles.calendarCell,
-                  isSelected && styles.calendarCellSelected,
-                  isToday && !isSelected && styles.calendarCellToday
+                  styles.calCell,
+                  isSelected && styles.calCellSel,
+                  isToday && !isSelected && styles.calCellToday,
                 ]}
                 onPress={() => {
-                  const newDate = new Date(tempSelectedDate);
-                  newDate.setDate(day);
-                  setTempSelectedDate(newDate);
+                  const d = new Date(tempSelectedDate);
+                  d.setDate(day);
+                  setTempSelectedDate(d);
                 }}
+                activeOpacity={0.75}
               >
-                <Text style={[
-                  styles.calendarDayText,
-                  isSelected && styles.calendarDayTextSelected,
-                  isToday && !isSelected && styles.calendarDayTextToday
-                ]}>
+                <Text
+                  style={[
+                    styles.calDayText,
+                    isSelected && styles.calDayTextSel,
+                    isToday && !isSelected && styles.calDayTextToday,
+                  ]}
+                >
                   {day}
                 </Text>
               </TouchableOpacity>
@@ -432,1002 +437,1336 @@ export default function CowInfoScreen() {
     );
   };
 
+  // Tab content renderers
   const renderOverview = () => (
     <View style={styles.card}>
-      <Text style={styles.label}>Cow ID</Text>
-      <TextInput value={cowData?.uniqueId || ''} editable={false} style={[styles.input, styles.disabledInput]} />
-
-      <Text style={styles.label}>Name</Text>
-      <TextInput value={cowData?.name || ''} editable={false} style={[styles.input, styles.disabledInput]} />
-
-      <Text style={styles.label}>Breed</Text>
-      <TextInput value={cowData?.breed || ''} editable={false} style={[styles.input, styles.disabledInput]} />
-
-      <Text style={styles.label}>Date of Birth</Text>
-      <TextInput value={cowData?.dob || ''} editable={false} style={[styles.input, styles.disabledInput]} />
+      {[
+        { label: t("cowInfo.cowId"), value: cowData?.uniqueId },
+        { label: t("cowInfo.name"), value: cowData?.name },
+        { label: t("cowInfo.breed"), value: cowData?.breed },
+        { label: t("cowInfo.dateOfBirth"), value: cowData?.dob },
+      ].map(({ label, value }) => (
+        <View key={label}>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <View style={styles.fieldBox}>
+            <Text style={styles.fieldText}>{value || "—"}</Text>
+          </View>
+        </View>
+      ))}
     </View>
   );
 
   const renderVitals = () => (
     <View style={styles.card}>
-      <Text style={styles.label}>Weight (kg)</Text>
-      <TextInput 
-        value={data?.weight || ''} 
-        onChangeText={(v) => updateRecord('weight', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter weight"
-      />
-
-      <Text style={styles.label}>Height (cm)</Text>
-      <TextInput 
-        value={data?.height || ''} 
-        onChangeText={(v) => updateRecord('height', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter height"
-      />
-
-      <Text style={styles.label}>Temperature (°C)</Text>
-      <TextInput 
-        value={data?.temperature || ''} 
-        onChangeText={(v) => updateRecord('temperature', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter temperature"
-      />
+      {[
+        {
+          label: t("cowInfo.weight"),
+          field: "weight",
+          placeholder: t("cowInfo.enterWeight"),
+        },
+        {
+          label: t("cowInfo.height"),
+          field: "height",
+          placeholder: t("cowInfo.enterHeight"),
+        },
+        {
+          label: t("cowInfo.temperature"),
+          field: "temperature",
+          placeholder: t("cowInfo.enterTemperature"),
+        },
+      ].map(({ label, field, placeholder }) => (
+        <View key={field}>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <TextInput
+            value={data?.[field] || ""}
+            onChangeText={(v) => updateRecord(field, v)}
+            style={styles.inputField}
+            keyboardType="decimal-pad"
+            placeholder={placeholder}
+            placeholderTextColor="rgba(255,255,255,0.3)"
+          />
+        </View>
+      ))}
     </View>
   );
 
   const renderProduction = () => (
     <View style={styles.card}>
-      <Text style={styles.label}>Milk yield (L/day)</Text>
-      <TextInput 
-        value={data?.milkYield || ''} 
-        onChangeText={(v) => updateRecord('milkYield', v)} 
-        style={styles.input}
+      <Text style={styles.fieldLabel}>{t("cowInfo.milkYield")}</Text>
+      <TextInput
+        value={data?.milkYield || ""}
+        onChangeText={(v) => updateRecord("milkYield", v)}
+        style={styles.inputField}
         keyboardType="decimal-pad"
-        placeholder="Enter milk yield"
+        placeholder={t("cowInfo.enterMilkYield")}
+        placeholderTextColor="rgba(255,255,255,0.3)"
       />
     </View>
   );
 
   const renderIntake = () => (
     <View style={styles.card}>
-      <Text style={styles.label}>Food intake (kg/day)</Text>
-      <TextInput 
-        value={data?.intakeFood || ''} 
-        onChangeText={(v) => updateRecord('intakeFood', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter food intake"
-      />
-
-      <Text style={styles.label}>Water intake (L/day)</Text>
-      <TextInput 
-        value={data?.intakeWater || ''} 
-        onChangeText={(v) => updateRecord('intakeWater', v)} 
-        style={styles.input}
-        keyboardType="decimal-pad"
-        placeholder="Enter water intake"
-      />
+      {[
+        {
+          label: t("cowInfo.foodIntake"),
+          field: "intakeFood",
+          placeholder: t("cowInfo.enterFoodIntake"),
+        },
+        {
+          label: t("cowInfo.waterIntake"),
+          field: "intakeWater",
+          placeholder: t("cowInfo.enterWaterIntake"),
+        },
+      ].map(({ label, field, placeholder }) => (
+        <View key={field}>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <TextInput
+            value={data?.[field] || ""}
+            onChangeText={(v) => updateRecord(field, v)}
+            style={styles.inputField}
+            keyboardType="decimal-pad"
+            placeholder={placeholder}
+            placeholderTextColor="rgba(255,255,255,0.3)"
+          />
+        </View>
+      ))}
     </View>
   );
 
   const renderHealth = () => (
     <View style={styles.card}>
-      <Text style={styles.label}>Vaccinations</Text>
-      <TextInput
-        value={data?.vaccinations || ''}
-        onChangeText={(v) => updateRecord('vaccinations', v)}
-        style={[styles.input, styles.textarea]}
-        multiline
-        placeholder="Enter vaccination details"
-      />
-
-      <Text style={styles.label}>Illness history</Text>
-      <TextInput
-        value={data?.illnesses || ''}
-        onChangeText={(v) => updateRecord('illnesses', v)}
-        style={[styles.input, styles.textarea]}
-        multiline
-        placeholder="Enter illness history"
-      />
+      {[
+        {
+          label: t("cowInfo.vaccinations"),
+          field: "vaccinations",
+          placeholder: t("cowInfo.enterVaccinationDetails"),
+        },
+        {
+          label: t("cowInfo.illnessHistory"),
+          field: "illnesses",
+          placeholder: t("cowInfo.enterIllnessHistory"),
+        },
+      ].map(({ label, field, placeholder }) => (
+        <View key={field}>
+          <Text style={styles.fieldLabel}>{label}</Text>
+          <TextInput
+            value={data?.[field] || ""}
+            onChangeText={(v) => updateRecord(field, v)}
+            style={[styles.inputField, styles.textarea]}
+            multiline
+            placeholder={placeholder}
+            placeholderTextColor="rgba(255,255,255,0.3)"
+          />
+        </View>
+      ))}
     </View>
   );
 
   const Content = useMemo(() => {
-    switch (activeTab) {
-      case 'Vitals':
-        return renderVitals();
-      case 'Production':
-        return renderProduction();
-      case 'Intake':
-        return renderIntake();
-      case 'Health':
-        return renderHealth();
-      case 'Overview':
-      default:
-        return renderOverview();
-    }
+    const map = {
+      Vitals: renderVitals,
+      Production: renderProduction,
+      Intake: renderIntake,
+      Health: renderHealth,
+      Overview: renderOverview,
+    };
+    return map[activeTab] || renderOverview;
   }, [activeTab, data, cowData]);
 
-  // List Cows Screen
-  if (mode === 'listCows') {
+  const animStyle = {
+    opacity: fadeAnim,
+    transform: [{ translateY: slideAnim }],
+  };
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // MODE: LIST COWS
+  // ═════════════════════════════════════════════════════════════════════════
+  if (mode === "listCows") {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => {
-            setMode('initial');
-            setSearchQuery('');
-            setFilteredCows([]);
-          }} style={styles.back}>
-            <Ionicons name="arrow-back" size={22} color="#2c3e50" />
-          </TouchableOpacity>
-          <Text style={styles.title}>All Cows</Text>
-          <Text style={styles.subtitle}>{filteredCows.length} cow{filteredCows.length !== 1 ? 's' : ''} found</Text>
-        </View>
-
-        {/* Search Bar */}
-        <View style={styles.listSearchContainer}>
-          <View style={styles.listSearchBox}>
-            <Ionicons name="search" size={20} color="#7f8c8d" style={styles.searchIcon} />
-            <TextInput
-              placeholder="Search by name, ID, or breed..."
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              style={styles.listSearchInput}
-              autoCapitalize="none"
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={() => setSearchQuery('')}>
-                <Ionicons name="close-circle" size={20} color="#7f8c8d" />
-              </TouchableOpacity>
-            )}
+      <LinearGradient
+        colors={["#0f1923", "#142233", "#0d1f2d"]}
+        style={styles.gradient}
+      >
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="transparent"
+          translucent
+        />
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.langWrap}>
+            <LanguageSelector />
           </View>
-        </View>
 
-        {/* Cows List */}
-        {isLoadingCows ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#4CAF50" />
-            <Text style={styles.loadingText}>Loading cows...</Text>
-          </View>
-        ) : filteredCows.length > 0 ? (
-          <ScrollView style={styles.cowsList} contentContainerStyle={styles.cowsListContent}>
-            {filteredCows.map((cow) => (
-              <TouchableOpacity
-                key={cow.uniqueId}
-                style={styles.cowListItem}
-                onPress={() => handleSelectCow(cow)}
-              >
-                <View style={styles.cowListItemIcon}>
-                  <Ionicons name="leaf" size={24} color="#4CAF50" />
-                </View>
-                <View style={styles.cowListItemContent}>
-                  <Text style={styles.cowListItemName}>{cow.name || 'Unnamed'}</Text>
-                  <View style={styles.cowListItemDetails}>
-                    <Text style={styles.cowListItemId}>ID: {cow.uniqueId}</Text>
-                    {cow.breed && (
-                      <Text style={styles.cowListItemBreed}>• {cow.breed}</Text>
-                    )}
-                  </View>
-                  {cow.dob && (
-                    <Text style={styles.cowListItemDob}>DOB: {cow.dob}</Text>
-                  )}
-                </View>
-                <Ionicons name="chevron-forward" size={20} color="#7f8c8d" />
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={styles.emptyContainer}>
-            <Ionicons name="leaf-outline" size={64} color="#cbd5e1" />
-            <Text style={styles.emptyText}>
-              {searchQuery.trim() 
-                ? 'No cows found matching your search' 
-                : 'No cows registered yet'}
-            </Text>
-            {!searchQuery.trim() && (
-              <TouchableOpacity 
-                style={styles.addCowButton}
-                onPress={() => router.push('/cow-registration')}
-              >
-                <Ionicons name="add-circle" size={20} color="#fff" />
-                <Text style={styles.addCowButtonText}>Register New Cow</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-      </SafeAreaView>
-    );
-  }
+          <Animated.View style={[styles.headerRow, animStyle]}>
+            <TouchableOpacity
+              onPress={() => {
+                setMode("initial");
+                setSearchQuery("");
+                setFilteredCows([]);
+              }}
+              style={styles.backBtn}
+            >
+              <Ionicons name="arrow-back" size={20} color="#fff" />
+            </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.pageTitle}>{t("cowInfo.allCows")}</Text>
+              <Text style={styles.pageSubtitle}>
+                {filteredCows.length}{" "}
+                {filteredCows.length !== 1
+                  ? t("cowInfo.cowsFoundPlural")
+                  : t("cowInfo.cowsFound")}
+              </Text>
+            </View>
+          </Animated.View>
 
-  // Initial Screen - Only Scan Option
-  if (mode === 'initial') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.back}>
-            <Ionicons name="arrow-back" size={22} color="#2c3e50" />
-          </TouchableOpacity>
-          <Text style={styles.title}>Cow Information</Text>
-          <Text style={styles.subtitle}>Scan QR code to get started</Text>
-        </View>
-
-        <View style={styles.initialContainer}>
-          <View style={styles.scanIconContainer}>
-            <Ionicons name="qr-code-outline" size={80} color="#4CAF50" />
-          </View>
-          <Text style={styles.initialTitle}>Scan Cow QR Code</Text>
-          <Text style={styles.initialSubtitle}>Point your camera at the cow&apos;s QR code to retrieve information</Text>
-          
-          <TouchableOpacity 
-            style={styles.scanButton} 
-            onPress={() => setScanVisible(true)}
-            disabled={isLoading}
-          >
-            <Ionicons name="camera" size={24} color="#fff" />
-            <Text style={styles.scanButtonText}>Scan QR Code</Text>
-          </TouchableOpacity>
-
-          <View style={styles.searchContainer}>
-            <Text style={styles.orText}>OR</Text>
-            <View style={styles.searchBox}>
+          {/* Search bar */}
+          <View style={styles.searchBarWrap}>
+            <LinearGradient
+              colors={["rgba(255,255,255,0.10)", "rgba(255,255,255,0.05)"]}
+              style={styles.searchBar}
+            >
+              <Ionicons name="search" size={16} color="rgba(255,255,255,0.5)" />
               <TextInput
-                placeholder="Search by Cow ID or Name"
+                placeholder={t("cowInfo.searchByCowId")}
                 value={searchQuery}
                 onChangeText={setSearchQuery}
                 style={styles.searchInput}
+                placeholderTextColor="rgba(255,255,255,0.3)"
               />
+              {searchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setSearchQuery("")}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={16}
+                    color="rgba(255,255,255,0.5)"
+                  />
+                </TouchableOpacity>
+              )}
+            </LinearGradient>
+          </View>
+
+          {/* List */}
+          {isLoadingCows ? (
+            <View style={styles.centerWrap}>
+              <ActivityIndicator size="large" color="#22c55e" />
+              <Text style={styles.loadingText}>{t("cowInfo.loadingCows")}</Text>
             </View>
-            <TouchableOpacity 
-              style={styles.searchButton} 
-              onPress={handleSearch}
-              disabled={isLoading}
-            >
-              <Ionicons name="search" size={20} color="#fff" />
-              <Text style={styles.searchButtonText}>Search</Text>
-            </TouchableOpacity>
-          </View>
+          ) : filteredCows.length > 0 ? (
+            <FlatList
+              data={filteredCows}
+              keyExtractor={(c) => c.uniqueId}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  onPress={() => handleSelectCow(item)}
+                  style={styles.cowTile}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={[
+                      "rgba(255,255,255,0.10)",
+                      "rgba(255,255,255,0.05)",
+                    ]}
+                    style={styles.cowTileInner}
+                  >
+                    <View style={styles.cowIconBadge}>
+                      <Ionicons name="leaf" size={20} color="#22c55e" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.cowTileName} numberOfLines={1}>
+                        {item.name || t("cowInfo.unnamed")}
+                      </Text>
+                      <Text style={styles.cowTileId} numberOfLines={1}>
+                        {t("cowInfo.cowId")}: {item.uniqueId}
+                      </Text>
+                      {item.breed && (
+                        <Text style={styles.cowTileBreed} numberOfLines={1}>
+                          • {item.breed}
+                        </Text>
+                      )}
+                    </View>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={18}
+                      color="rgba(255,255,255,0.4)"
+                    />
+                  </LinearGradient>
+                </TouchableOpacity>
+              )}
+            />
+          ) : (
+            <View style={styles.centerWrap}>
+              <Ionicons
+                name="leaf-outline"
+                size={64}
+                color="rgba(255,255,255,0.15)"
+              />
+              <Text style={styles.emptyText}>
+                {searchQuery.trim()
+                  ? t("cowInfo.noCowsFound")
+                  : t("cowInfo.noCowsRegistered")}
+              </Text>
+              {!searchQuery.trim() && (
+                <TouchableOpacity
+                  style={styles.addBtn}
+                  onPress={() => router.push("/cow-registration")}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="add-circle" size={18} color="#fff" />
+                  <Text style={styles.addBtnText}>
+                    {t("cowInfo.registerNewCow")}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </SafeAreaView>
+      </LinearGradient>
+    );
+  }
 
-          <View style={styles.listContainer}>
-            <Text style={styles.orText}>OR</Text>
-            <TouchableOpacity 
-              style={styles.listButton} 
-              onPress={handleListCows}
-              disabled={isLoadingCows}
-            >
-              <Ionicons name="list" size={24} color="#fff" />
-              <Text style={styles.listButtonText}>View All Cows</Text>
-            </TouchableOpacity>
+  // ═════════════════════════════════════════════════════════════════════════
+  // MODE: INITIAL (SCAN / SEARCH / LIST)
+  // ═════════════════════════════════════════════════════════════════════════
+  if (mode === "initial") {
+    return (
+      <LinearGradient
+        colors={["#0f1923", "#142233", "#0d1f2d"]}
+        style={styles.gradient}
+      >
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="transparent"
+          translucent
+        />
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.langWrap}>
+            <LanguageSelector />
           </View>
+          <ScrollView
+            contentContainerStyle={styles.scrollCentered}
+            showsVerticalScrollIndicator={false}
+          >
+            <Animated.View style={animStyle}>
+              <View style={styles.headerRow}>
+                <TouchableOpacity
+                  onPress={() => router.back()}
+                  style={styles.backBtn}
+                >
+                  <Ionicons name="arrow-back" size={20} color="#fff" />
+                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pageTitle}>{t("cowInfo.title")}</Text>
+                  <Text style={styles.pageSubtitle}>
+                    {t("cowInfo.subtitle")}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.initialWrap}>
+                <View style={styles.qrIconBadge}>
+                  <Ionicons name="qr-code" size={64} color="#22c55e" />
+                </View>
+                <Text style={styles.initialTitle}>
+                  {t("cowInfo.scanQrCode")}
+                </Text>
+                <Text style={styles.initialSub}>
+                  {t("cowInfo.scanQrDescription")}
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.scanBtn}
+                  onPress={() => setScanVisible(true)}
+                  disabled={isLoading}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={["#22c55e", "#16a34a"]}
+                    style={StyleSheet.absoluteFillObject}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  />
+                  <Ionicons name="camera" size={20} color="#fff" />
+                  <Text style={styles.scanBtnText}>
+                    {t("cowInfo.scanQrCode")}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={styles.divider}>
+                  <Text style={styles.orText}>{t("common.or")}</Text>
+                </View>
+
+                <View style={styles.searchWrap}>
+                  <LinearGradient
+                    colors={[
+                      "rgba(255,255,255,0.10)",
+                      "rgba(255,255,255,0.05)",
+                    ]}
+                    style={styles.searchBox}
+                  >
+                    <TextInput
+                      placeholder={t("cowInfo.searchByCowId")}
+                      value={searchQuery}
+                      onChangeText={setSearchQuery}
+                      style={styles.searchBoxInput}
+                      placeholderTextColor="rgba(255,255,255,0.3)"
+                      autoCapitalize="none"
+                    />
+                  </LinearGradient>
+                  <TouchableOpacity
+                    style={styles.searchBoxBtn}
+                    onPress={handleSearch}
+                    disabled={isLoading}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="search" size={18} color="#fff" />
+                    <Text style={styles.searchBoxBtnText}>
+                      {t("common.search")}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.divider}>
+                  <Text style={styles.orText}>{t("common.or")}</Text>
+                </View>
+
+                <TouchableOpacity
+                  style={styles.listViewBtn}
+                  onPress={handleListCows}
+                  disabled={isLoadingCows}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="list" size={20} color="#fff" />
+                  <Text style={styles.listViewBtnText}>
+                    {t("cowInfo.viewAllCows")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </ScrollView>
+
+          {/* Scanner Modal */}
+          <Modal visible={scanVisible} animationType="slide">
+            <View style={styles.scanModalWrap}>
+              <SafeAreaView style={styles.scanModalSafe}>
+                <Text style={styles.scanModalTitle}>
+                  {t("cowInfo.scanQrCode")}
+                </Text>
+                {permission?.granted === false ? (
+                  <View style={styles.centerWrap}>
+                    <Text style={styles.scanPermText}>
+                      {t("cowInfo.cameraPermissionNotGranted")}
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.permBtn}
+                      onPress={requestPermission}
+                    >
+                      <Ionicons name="camera" size={16} color="#fff" />
+                      <Text style={styles.permBtnText}>
+                        {t("cowInfo.grantPermission")}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.scannerBox}>
+                    <CameraView
+                      style={StyleSheet.absoluteFillObject}
+                      onBarcodeScanned={handleScan}
+                      barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
+                    />
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.scanCloseBtn}
+                  onPress={() => setScanVisible(false)}
+                >
+                  <Text style={styles.scanCloseBtnText}>
+                    {t("common.close")}
+                  </Text>
+                </TouchableOpacity>
+              </SafeAreaView>
+            </View>
+          </Modal>
+        </SafeAreaView>
+      </LinearGradient>
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // MODE: COW SELECTED
+  // ═════════════════════════════════════════════════════════════════════════
+  if (mode === "cowSelected") {
+    return (
+      <LinearGradient
+        colors={["#0f1923", "#142233", "#0d1f2d"]}
+        style={styles.gradient}
+      >
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="transparent"
+          translucent
+        />
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.langWrap}>
+            <LanguageSelector />
+          </View>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            <Animated.View style={animStyle}>
+              <View style={styles.headerRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setMode("initial");
+                    setCowData(null);
+                    setSearchQuery("");
+                  }}
+                  style={styles.backBtn}
+                >
+                  <Ionicons name="arrow-back" size={20} color="#fff" />
+                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.pageTitle}>{t("cowInfo.title")}</Text>
+                  <Text style={styles.pageSubtitle}>
+                    {cowData?.name || t("cowInfo.cowDetails")}
+                  </Text>
+                </View>
+              </View>
+
+              <LinearGradient
+                colors={["rgba(255,255,255,0.10)", "rgba(255,255,255,0.05)"]}
+                style={styles.cowInfoBox}
+              >
+                <Text style={styles.cowInfoName}>
+                  {cowData?.name || t("cowInfo.unknown")}
+                </Text>
+                <Text style={styles.cowInfoId}>
+                  {t("cowInfo.cowId")}: {cowData?.uniqueId}
+                </Text>
+                <Text style={styles.cowInfoBreed}>
+                  {t("cowInfo.breed")}: {cowData?.breed || t("cowInfo.na")}
+                </Text>
+              </LinearGradient>
+
+              <View style={styles.actionBtnRow}>
+                <TouchableOpacity
+                  style={styles.actionCard}
+                  onPress={handleEnterReport}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={["#22c55e", "#16a34a"]}
+                    style={styles.actionCardGradient}
+                  >
+                    <Ionicons name="create-outline" size={32} color="#fff" />
+                    <Text style={styles.actionCardTitle}>
+                      {t("cowInfo.enterTodayReport")}
+                    </Text>
+                    <Text style={styles.actionCardSub}>
+                      {t("cowInfo.addDailyDetails")}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.actionCard}
+                  onPress={handleViewDetails}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={["#3b82f6", "#2563eb"]}
+                    style={styles.actionCardGradient}
+                  >
+                    <Ionicons name="eye-outline" size={32} color="#fff" />
+                    <Text style={styles.actionCardTitle}>
+                      {t("cowInfo.viewDetails")}
+                    </Text>
+                    <Text style={styles.actionCardSub}>
+                      {t("cowInfo.viewReportsByDate")}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </Animated.View>
+          </ScrollView>
+        </SafeAreaView>
+      </LinearGradient>
+    );
+  }
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // MODE: ENTER REPORT / VIEW DETAILS
+  // ═════════════════════════════════════════════════════════════════════════
+  return (
+    <LinearGradient
+      colors={["#0f1923", "#142233", "#0d1f2d"]}
+      style={styles.gradient}
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.langWrap}>
+          <LanguageSelector />
         </View>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <Animated.View style={animStyle}>
+            <View style={styles.headerRow}>
+              <TouchableOpacity
+                onPress={() => setMode("cowSelected")}
+                style={styles.backBtn}
+              >
+                <Ionicons name="arrow-back" size={20} color="#fff" />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pageTitle}>
+                  {mode === "enterReport"
+                    ? t("cowInfo.enterTodayReportTitle")
+                    : t("cowInfo.viewDetails")}
+                </Text>
+                <Text style={styles.pageSubtitle}>
+                  {cowData?.name || t("cowInfo.cowDetails")}
+                </Text>
+              </View>
+            </View>
 
-        {/* Scanner Modal */}
-        <Modal visible={scanVisible} animationType="slide">
-          <SafeAreaView style={styles.scanContainer}>
-            <Text style={styles.scanTitle}>Scan QR Code</Text>
-            {permission?.granted === false && (
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={styles.scanInfo}>Camera permission not granted.</Text>
-                <TouchableOpacity style={[styles.searchBtn, { marginTop: 16 }]} onPress={requestPermission}>
-                  <Ionicons name="camera" size={18} color="#fff" />
-                  <Text style={styles.searchText}>Grant Permission</Text>
+            {mode === "viewDetails" && (
+              <View style={styles.dateNav}>
+                <TouchableOpacity
+                  onPress={goPrevDay}
+                  style={styles.dateNavBtn}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="chevron-back"
+                    size={14}
+                    color="rgba(255,255,255,0.7)"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={openDatePicker}
+                  style={styles.dateBadge}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="calendar"
+                    size={14}
+                    color="rgba(255,255,255,0.7)"
+                  />
+                  <Text style={styles.dateBadgeText} numberOfLines={1}>
+                    {formatPrettyDate(selectedDate)}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={goNextDay}
+                  style={styles.dateNavBtn}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons
+                    name="chevron-forward"
+                    size={14}
+                    color="rgba(255,255,255,0.7)"
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={goToday}
+                  style={styles.todayBtn}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="flash" size={12} color="#fff" />
+                  <Text style={styles.todayBtnText}>{t("common.today")}</Text>
                 </TouchableOpacity>
               </View>
             )}
-            {permission?.granted && (
-              <View style={styles.scannerBox}>
-                <CameraView
-                  style={StyleSheet.absoluteFillObject}
-                  onBarcodeScanned={handleScan}
-                  barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                />
+
+            {mode === "enterReport" && (
+              <View style={styles.todayBadgeBox}>
+                <Ionicons name="calendar" size={14} color="#22c55e" />
+                <Text style={styles.todayBadgeBoxText}>
+                  {t("common.today")}: {formatPrettyDate(new Date())}
+                </Text>
               </View>
             )}
-            <TouchableOpacity style={styles.scanClose} onPress={() => setScanVisible(false)}>
-              <Text style={styles.scanCloseText}>Close</Text>
-            </TouchableOpacity>
-          </SafeAreaView>
+
+            {/* Tabs */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.tabsScroll}
+            >
+              <View style={styles.tabsRow}>
+                {TABS.map((tab) => (
+                  <TabButton
+                    key={tab.key}
+                    label={tab.label}
+                    active={tab.key === activeTab}
+                    onPress={() => setActiveTab(tab.key)}
+                  />
+                ))}
+              </View>
+            </ScrollView>
+
+            {data || mode === "enterReport" ? (
+              Content()
+            ) : (
+              <View style={styles.emptyBox}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={48}
+                  color="rgba(255,255,255,0.2)"
+                />
+                <Text style={styles.emptyBoxText}>
+                  {mode === "viewDetails"
+                    ? t("cowInfo.noReportFound") +
+                      " " +
+                      formatPrettyDate(selectedDate) +
+                      "."
+                    : t("cowInfo.startEnteringData")}
+                </Text>
+              </View>
+            )}
+
+            {mode === "enterReport" && (
+              <TouchableOpacity
+                style={[styles.saveBtn, isLoading && styles.saveBtnDisabled]}
+                onPress={handleSave}
+                disabled={isLoading}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={["#22c55e", "#16a34a"]}
+                  style={StyleSheet.absoluteFillObject}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                />
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <>
+                    <Text style={styles.saveBtnText}>
+                      {t("cowInfo.saveTodayReport")}
+                    </Text>
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={18}
+                      color="#fff"
+                      style={{ marginLeft: 8 }}
+                    />
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
+          </Animated.View>
+        </ScrollView>
+
+        {/* Date Picker Modal */}
+        <Modal
+          visible={datePickerVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setDatePickerVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalSheet}>
+              <View style={styles.modalHandle} />
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>{t("cowInfo.selectDate")}</Text>
+                <TouchableOpacity
+                  onPress={() => setDatePickerVisible(false)}
+                  style={styles.modalClose}
+                >
+                  <Ionicons name="close" size={20} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
+              {renderCalendar()}
+              <View style={styles.modalBtns}>
+                <TouchableOpacity
+                  style={styles.modalCancelBtn}
+                  onPress={() => setDatePickerVisible(false)}
+                >
+                  <Text style={styles.modalCancelText}>
+                    {t("common.cancel")}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.modalConfirmBtn}
+                  onPress={handleDateSelect}
+                >
+                  <Text style={styles.modalConfirmText}>
+                    {t("common.select")}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
         </Modal>
       </SafeAreaView>
-    );
-  }
-
-  // Cow Selected - Show Action Buttons
-  if (mode === 'cowSelected') {
-    return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView contentContainerStyle={styles.content}>
-          <View style={styles.header}>
-            <TouchableOpacity onPress={() => {
-              setMode('initial');
-              setCowData(null);
-              setSearchQuery('');
-            }} style={styles.back}>
-              <Ionicons name="arrow-back" size={22} color="#2c3e50" />
-            </TouchableOpacity>
-            <Text style={styles.title}>Cow Information</Text>
-            <Text style={styles.subtitle}>{cowData?.name || 'Cow Details'}</Text>
-          </View>
-
-          <View style={styles.cowInfoCard}>
-            <Text style={styles.cowName}>{cowData?.name || 'Unknown'}</Text>
-            <Text style={styles.cowId}>ID: {cowData?.uniqueId}</Text>
-            <Text style={styles.cowBreed}>Breed: {cowData?.breed || 'N/A'}</Text>
-          </View>
-
-          <View style={styles.actionButtonsContainer}>
-            <TouchableOpacity style={styles.actionButton} onPress={handleEnterReport}>
-              <Ionicons name="create-outline" size={32} color="#fff" />
-              <Text style={styles.actionButtonText}>Enter Today&apos;s Report</Text>
-              <Text style={styles.actionButtonSubtext}>Add daily details for this cow</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.actionButton, styles.viewButton]} onPress={handleViewDetails}>
-              <Ionicons name="eye-outline" size={32} color="#fff" />
-              <Text style={styles.actionButtonText}>View Details</Text>
-              <Text style={styles.actionButtonSubtext}>View reports by date</Text>
-            </TouchableOpacity>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  // Enter Report or View Details Mode
-  return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => setMode('cowSelected')} style={styles.back}>
-            <Ionicons name="arrow-back" size={22} color="#2c3e50" />
-          </TouchableOpacity>
-          <Text style={styles.title}>
-            {mode === 'enterReport' ? "Enter Today's Report" : 'View Details'}
-          </Text>
-          <Text style={styles.subtitle}>{cowData?.name || 'Cow Details'}</Text>
-        </View>
-
-        {mode === 'viewDetails' && (
-          <View style={styles.dateRow}>
-            <TouchableOpacity onPress={goPrevDay} style={[styles.chipBtn, styles.chipBtnLight]}>
-              <Ionicons name="chevron-back" size={14} color="#2c3e50" />
-              <Text style={styles.chipTextDark}>Prev</Text>
-            </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={openDatePicker}
-              style={styles.datePill}
-            >
-              <Ionicons name="calendar" size={14} color="#2c3e50" />
-              <Text style={styles.dateText} numberOfLines={1}>{formatPrettyDate(selectedDate)}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={goNextDay} style={[styles.chipBtn, styles.chipBtnLight]}>
-              <Text style={styles.chipTextDark}>Next</Text>
-              <Ionicons name="chevron-forward" size={14} color="#2c3e50" />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={goToday} style={[styles.chipBtn, styles.chipBtnPrimary]}>
-              <Ionicons name="flash" size={14} color="#fff" />
-              <Text style={styles.chipTextLight}>Today</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {mode === 'enterReport' && (
-          <View style={styles.todayBadge}>
-            <Ionicons name="calendar" size={16} color="#4CAF50" />
-            <Text style={styles.todayText}>Today: {formatPrettyDate(new Date())}</Text>
-          </View>
-        )}
-
-        {/* Tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer}>
-          <View style={styles.tabs}>
-            {TABS.map((t) => (
-              <TabButton key={t} label={t} active={t === activeTab} onPress={() => setActiveTab(t)} />
-            ))}
-          </View>
-        </ScrollView>
-
-        {data || mode === 'enterReport' ? Content : (
-          <View style={styles.placeholder}> 
-            <Ionicons name="information-circle" size={28} color="#9aa3a9" />
-            <Text style={styles.placeholderText}>
-              {mode === 'viewDetails' 
-                ? `No report found for ${formatPrettyDate(selectedDate)}.`
-                : 'Start entering data for today.'}
-            </Text>
-          </View>
-        )}
-
-        {mode === 'enterReport' && (
-          <TouchableOpacity 
-            style={[styles.saveBtn, isLoading && styles.saveBtnDisabled]} 
-            onPress={handleSave}
-            disabled={isLoading}
-          >
-            <Text style={styles.saveText}>
-              {isLoading ? 'Saving...' : "Save Today's Report"}
-            </Text>
-            {!isLoading && <Ionicons name="checkmark" size={18} color="#fff" />}
-          </TouchableOpacity>
-        )}
-      </ScrollView>
-
-      {/* Date Picker Modal */}
-      <Modal
-        visible={datePickerVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setDatePickerVisible(false)}
-      >
-        <View style={styles.datePickerModalOverlay}>
-          <View style={styles.datePickerModalContent}>
-            <View style={styles.datePickerModalHeader}>
-              <Text style={styles.datePickerModalTitle}>Select Date</Text>
-              <TouchableOpacity onPress={() => setDatePickerVisible(false)}>
-                <Ionicons name="close" size={24} color="#2c3e50" />
-              </TouchableOpacity>
-            </View>
-            
-            {renderCalendar()}
-            
-            <View style={styles.datePickerButtons}>
-              <TouchableOpacity 
-                style={[styles.datePickerButton, styles.datePickerCancelButton]}
-                onPress={() => setDatePickerVisible(false)}
-              >
-                <Text style={styles.datePickerCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.datePickerButton, styles.datePickerConfirmButton]}
-                onPress={handleDateSelect}
-              >
-                <Text style={styles.datePickerConfirmText}>Select</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
+    </LinearGradient>
   );
 }
 
+// ═════════════════════════════════════════════════════════════════════════
+// STYLES
+// ═════════════════════════════════════════════════════════════════════════
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa'},
-  content: { padding: 20, paddingBottom: 32 },
-  header: { marginBottom: 10 },
-  back: { padding: 6, alignSelf: 'flex-start' },
-  title: { fontSize: 24, fontWeight: '800', color: '#1f2937', marginTop: 6, paddingLeft: 10 },
-  subtitle: { fontSize: 14, color: '#6b7280', marginTop: 2, paddingLeft: 10 },
-
-  // Initial Screen Styles
-  initialContainer: {
+  gradient: { flex: 1 },
+  safe: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
   },
-  scanIconContainer: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: '#e8f5e8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 30,
+
+  langWrap: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 52 : (StatusBar.currentHeight || 0) + 12,
+    right: 16,
+    zIndex: 1000,
+  },
+
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop:
+      Platform.OS === "ios" ? 64 : (StatusBar.currentHeight || 0) + 20,
+    paddingBottom: 48,
+  },
+  scrollCentered: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingTop:
+      Platform.OS === "ios" ? 64 : (StatusBar.currentHeight || 0) + 20,
+    paddingBottom: 48,
+  },
+
+  // Header
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    marginBottom: 24,
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+  },
+  pageTitle: {
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: 0.2,
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.5)",
+    marginTop: 2,
+    fontWeight: "500",
+  },
+
+  // Initial screen
+  initialWrap: { alignItems: "center", gap: 16, marginTop: 40 },
+  qrIconBadge: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: "rgba(34,197,94,0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 10,
+    borderWidth: 2,
+    borderColor: "rgba(34,197,94,0.2)",
   },
   initialTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 10,
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
+    textAlign: "center",
   },
-  initialSubtitle: {
-    fontSize: 16,
-    color: '#7f8c8d',
-    textAlign: 'center',
-    paddingHorizontal: 40,
-    marginBottom: 40,
-  },
-  scanButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    paddingVertical: 16,
-    paddingHorizontal: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 30,
-    shadowColor: '#4CAF50',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
-  },
-  scanButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginLeft: 10,
-  },
-  searchContainer: {
-    width: '100%',
-    paddingHorizontal: 20,
-  },
-  orText: {
-    textAlign: 'center',
-    color: '#7f8c8d',
-    marginBottom: 15,
+  initialSub: {
     fontSize: 14,
-  },
-  searchBox: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#e6e8eb',
+    color: "rgba(255,255,255,0.5)",
+    textAlign: "center",
+    paddingHorizontal: 30,
     marginBottom: 10,
-  },
-  searchInput: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#2c3e50',
-  },
-  searchButton: {
-    backgroundColor: '#2196F3',
-    borderRadius: 10,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
   },
 
-  // List View Styles
-  listContainer: {
-    width: '100%',
-    paddingHorizontal: 20,
-    marginTop: 10,
-  },
-  listButton: {
-    backgroundColor: '#2196F3',
-    borderRadius: 12,
+  scanBtn: {
+    width: "100%",
+    borderRadius: 14,
     paddingVertical: 16,
-    paddingHorizontal: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#2196F3',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    overflow: "hidden",
+    shadowColor: "#22c55e",
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
     elevation: 8,
   },
-  listButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginLeft: 10,
-  },
-  listSearchContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e6e8eb',
-  },
-  listSearchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: '#e6e8eb',
-  },
-  searchIcon: {
-    marginRight: 8,
-  },
-  listSearchInput: {
-    flex: 1,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#2c3e50',
-  },
-  cowsList: {
-    flex: 1,
-  },
-  cowsListContent: {
-    padding: 16,
-  },
-  cowListItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e6e8eb',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cowListItemIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e8f5e8',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  cowListItemContent: {
-    flex: 1,
-  },
-  cowListItemName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 4,
-  },
-  cowListItemDetails: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  cowListItemId: {
-    fontSize: 13,
-    color: '#7f8c8d',
-    marginRight: 8,
-  },
-  cowListItemBreed: {
-    fontSize: 13,
-    color: '#7f8c8d',
-  },
-  cowListItemDob: {
+  scanBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+
+  divider: { width: "100%", alignItems: "center", marginVertical: 10 },
+  orText: {
     fontSize: 12,
-    color: '#9aa3a9',
+    color: "rgba(255,255,255,0.4)",
+    fontWeight: "600",
+    textTransform: "uppercase",
   },
-  loadingContainer: {
+
+  searchWrap: { width: "100%", gap: 10 },
+  searchBox: {
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  searchBoxInput: { fontSize: 15, color: "#fff", fontWeight: "500" },
+  searchBoxBtn: {
+    backgroundColor: "#3b82f6",
+    borderRadius: 12,
+    paddingVertical: 14,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    shadowColor: "#3b82f6",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  searchBoxBtnText: { color: "#fff", fontSize: 15, fontWeight: "700" },
+
+  listViewBtn: {
+    width: "100%",
+    backgroundColor: "#3b82f6",
+    borderRadius: 12,
+    paddingVertical: 14,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    shadowColor: "#3b82f6",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  listViewBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+
+  // List view
+  searchBarWrap: { paddingHorizontal: 20, paddingVertical: 12 },
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  searchInput: { flex: 1, fontSize: 15, color: "#fff", fontWeight: "500" },
+
+  listContent: { padding: 20, gap: 12 },
+  cowTile: { borderRadius: 16, overflow: "hidden" },
+  cowTileInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  cowIconBadge: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(34,197,94,0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cowTileName: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 3,
+  },
+  cowTileId: { fontSize: 12, color: "rgba(255,255,255,0.5)", marginBottom: 2 },
+  cowTileBreed: { fontSize: 12, color: "rgba(255,255,255,0.5)" },
+
+  centerWrap: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     paddingVertical: 60,
+    gap: 14,
   },
   loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#7f8c8d',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-    paddingHorizontal: 40,
+    fontSize: 14,
+    color: "rgba(255,255,255,0.5)",
+    fontWeight: "500",
   },
   emptyText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#9aa3a9',
-    textAlign: 'center',
+    fontSize: 14,
+    color: "rgba(255,255,255,0.4)",
+    textAlign: "center",
+    paddingHorizontal: 40,
   },
-  addCowButton: {
-    marginTop: 24,
-    backgroundColor: '#4CAF50',
+  addBtn: {
+    marginTop: 10,
+    backgroundColor: "#22c55e",
     borderRadius: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
-  addCowButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  addBtnText: { color: "#fff", fontSize: 14, fontWeight: "600" },
 
-  // Cow Selected Screen
-  cowInfoCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
+  // Cow selected
+  cowInfoBox: {
+    borderRadius: 18,
     padding: 20,
     marginBottom: 20,
     borderWidth: 1,
-    borderColor: '#eef2f7',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  cowName: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#2c3e50',
+  cowInfoName: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#fff",
     marginBottom: 8,
   },
-  cowId: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    marginBottom: 4,
-  },
-  cowBreed: {
-    fontSize: 14,
-    color: '#7f8c8d',
-  },
-  actionButtonsContainer: {
-    gap: 15,
-  },
-  actionButton: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 16,
+  cowInfoId: { fontSize: 13, color: "rgba(255,255,255,0.6)", marginBottom: 4 },
+  cowInfoBreed: { fontSize: 13, color: "rgba(255,255,255,0.6)" },
+
+  actionBtnRow: { gap: 14 },
+  actionCard: { borderRadius: 16, overflow: "hidden" },
+  actionCardGradient: {
     padding: 24,
-    alignItems: 'center',
-    shadowColor: '#4CAF50',
+    alignItems: "center",
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
-    shadowRadius: 4.65,
+    shadowRadius: 8,
     elevation: 8,
   },
-  viewButton: {
-    backgroundColor: '#2196F3',
-    shadowColor: '#2196F3',
-  },
-  actionButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  actionCardTitle: {
+    color: "#fff",
+    fontSize: 17,
+    fontWeight: "700",
     marginTop: 12,
     marginBottom: 4,
   },
-  actionButtonSubtext: {
-    color: '#fff',
-    fontSize: 14,
-    opacity: 0.9,
-  },
+  actionCardSub: { color: "rgba(255,255,255,0.8)", fontSize: 13 },
 
-  // Date Navigation
-  dateRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginTop: 8, 
+  // Date nav
+  dateNav: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
     marginBottom: 16,
-    paddingHorizontal: 4,
-    gap: 6
   },
-  datePill: { 
-    flex: 1, 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    backgroundColor: '#fff', 
-    borderWidth: 1, 
-    borderColor: '#e6e8eb', 
-    borderRadius: 20, 
-    paddingVertical: 8, 
-    paddingHorizontal: 12,
-    minHeight: 40
+  dateNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  dateText: { 
-    marginLeft: 6, 
-    color: '#111827', 
-    fontWeight: '600', 
-    fontSize: 13,
+  dateBadge: {
     flex: 1,
-    textAlign: 'center'
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  chipBtn: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    borderRadius: 20, 
-    paddingVertical: 8, 
+  dateBadgeText: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.7)",
+    fontWeight: "600",
+    flex: 1,
+    textAlign: "center",
+  },
+  todayBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#22c55e",
+    borderRadius: 10,
+    paddingVertical: 8,
     paddingHorizontal: 10,
-    minHeight: 40,
-    minWidth: 60,
-    justifyContent: 'center'
   },
-  chipBtnLight: { backgroundColor: '#e5f3e8' },
-  chipBtnPrimary: { backgroundColor: '#10b981' },
-  chipTextLight: { color: '#fff', fontWeight: '700', marginLeft: 4, fontSize: 12 },
-  chipTextDark: { color: '#2c3e50', fontWeight: '700', marginHorizontal: 2, fontSize: 12 },
+  todayBtnText: { fontSize: 11, color: "#fff", fontWeight: "700" },
 
-  todayBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#e8f5e8',
-    borderRadius: 20,
+  todayBadgeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "rgba(34,197,94,0.12)",
+    borderRadius: 12,
     paddingVertical: 10,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     marginBottom: 16,
-    alignSelf: 'flex-start',
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderColor: "rgba(34,197,94,0.25)",
   },
-  todayText: {
-    color: '#4CAF50',
-    fontWeight: '600',
-    marginLeft: 8,
-    fontSize: 14,
-  },
+  todayBadgeBoxText: { fontSize: 13, color: "#22c55e", fontWeight: "600" },
 
   // Tabs
-  tabsContainer: { marginTop: 16 },
-  tabs: { 
-    flexDirection: 'row', 
-    backgroundColor: '#e6f7ef', 
-    borderRadius: 12, 
-    padding: 4,
-    minWidth: '100%'
-  },
-  tabButton: { 
-    paddingVertical: 12, 
-    paddingHorizontal: 16, 
-    borderRadius: 10, 
-    alignItems: 'center',
-    minWidth: 80,
-    flex: 1
-  },
-  tabButtonActive: { backgroundColor: '#10b981' },
-  tabText: { color: '#2c3e50', fontWeight: '600', fontSize: 13 },
-  tabTextActive: { color: '#fff' },
-
-  // Form
-  card: {
-    backgroundColor: 'white', borderRadius: 16, padding: 16, marginTop: 16,
-    borderWidth: 1, borderColor: '#eef2f7',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 6, elevation: 2,
-  },
-  label: { fontSize: 13, color: '#6b7280', marginTop: 10, marginBottom: 6 },
-  input: { backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#e6e8eb', paddingHorizontal: 12, paddingVertical: 12, fontSize: 16, color: '#111827' },
-  disabledInput: { backgroundColor: '#f8f9fa', color: '#6b7280' },
-  textarea: { minHeight: 90, textAlignVertical: 'top' },
-
-  placeholder: { alignItems: 'center', justifyContent: 'center', paddingVertical: 40 },
-  placeholderText: { marginTop: 8, color: '#9aa3a9', textAlign: 'center', paddingHorizontal: 20 },
-
-  saveBtn: { marginTop: 20, backgroundColor: '#10b981', borderRadius: 12, paddingVertical: 14, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  saveBtnDisabled: { opacity: 0.6 },
-  saveText: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginRight: 8 },
-
-  // Scanner
-  scanContainer: { flex: 1, backgroundColor: '#000' },
-  scanTitle: { color: '#fff', textAlign: 'center', padding: 16, fontWeight: 'bold', fontSize: 16 },
-  scannerBox: { flex: 1 },
-  scanInfo: { color: '#fff', textAlign: 'center', marginTop: 16 },
-  scanClose: { padding: 14, backgroundColor: '#111', alignItems: 'center' },
-  scanCloseText: { color: '#fff', fontWeight: '600' },
-  searchBtn: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#10b981', borderRadius: 10, paddingVertical: 12, paddingHorizontal: 14,
-    marginLeft: 4,
-  },
-  searchText: { color: '#fff', fontSize: 15, fontWeight: '600', marginLeft: 6 },
-
-  // Date Picker Modal Styles
-  datePickerModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  datePickerModalContent: {
-    backgroundColor: 'white',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
-    maxHeight: '80%',
-  },
-  datePickerModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  datePickerModalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  calendarContainer: {
-    marginBottom: 20,
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 10,
-  },
-  calendarNavButton: {
-    padding: 8,
-  },
-  calendarMonthText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  weekDaysRow: {
-    flexDirection: 'row',
-    marginBottom: 10,
-  },
-  weekDayCell: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  weekDayText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#6b7280',
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  calendarCell: {
-    width: '14.28%',
-    aspectRatio: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 4,
-  },
-  calendarCellSelected: {
-    backgroundColor: '#4CAF50',
-    borderRadius: 20,
-  },
-  calendarCellToday: {
-    backgroundColor: '#e8f5e8',
-    borderRadius: 20,
-  },
-  calendarDayText: {
-    fontSize: 14,
-    color: '#2c3e50',
-    fontWeight: '500',
-  },
-  calendarDayTextSelected: {
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  calendarDayTextToday: {
-    color: '#4CAF50',
-    fontWeight: 'bold',
-  },
-  datePickerButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-    gap: 10,
-  },
-  datePickerButton: {
-    flex: 1,
-    paddingVertical: 14,
+  tabsScroll: { marginBottom: 16 },
+  tabsRow: {
+    flexDirection: "row",
+    gap: 6,
+    backgroundColor: "rgba(255,255,255,0.06)",
     borderRadius: 12,
-    alignItems: 'center',
+    padding: 4,
   },
-  datePickerCancelButton: {
-    backgroundColor: '#f8f9fa',
+  tabBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    minWidth: 80,
+    alignItems: "center",
+  },
+  tabBtnActive: { backgroundColor: "#22c55e" },
+  tabText: { fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: "600" },
+  tabTextActive: { color: "#fff", fontWeight: "700" },
+
+  // Form card
+  card: {
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 18,
+    padding: 18,
     borderWidth: 1,
-    borderColor: '#e6e8eb',
+    borderColor: "rgba(255,255,255,0.08)",
+    gap: 14,
   },
-  datePickerConfirmButton: {
-    backgroundColor: '#4CAF50',
+  fieldLabel: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.5)",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+    marginBottom: 6,
   },
-  datePickerCancelText: {
-    color: '#2c3e50',
+  fieldBox: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  fieldText: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.7)",
+    fontWeight: "500",
+  },
+  inputField: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 14,
+    color: "#fff",
+    fontWeight: "500",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  textarea: { minHeight: 80, textAlignVertical: "top" },
+
+  emptyBox: { alignItems: "center", paddingVertical: 40, gap: 12 },
+  emptyBoxText: {
+    fontSize: 14,
+    color: "rgba(255,255,255,0.4)",
+    textAlign: "center",
+    paddingHorizontal: 30,
+  },
+
+  saveBtn: {
+    marginTop: 24,
+    borderRadius: 14,
+    paddingVertical: 16,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    overflow: "hidden",
+    shadowColor: "#22c55e",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  saveBtnDisabled: { opacity: 0.5 },
+  saveBtnText: { color: "#fff", fontSize: 16, fontWeight: "700" },
+
+  // Scanner modal
+  scanModalWrap: { flex: 1, backgroundColor: "#000" },
+  scanModalSafe: { flex: 1 },
+  scanModalTitle: {
+    color: "#fff",
+    textAlign: "center",
+    padding: 16,
+    fontWeight: "700",
     fontSize: 16,
-    fontWeight: '600',
   },
-  datePickerConfirmText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+  scanPermText: {
+    color: "rgba(255,255,255,0.7)",
+    textAlign: "center",
+    paddingHorizontal: 40,
+    marginBottom: 16,
   },
+  permBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#22c55e",
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  permBtnText: { color: "#fff", fontSize: 14, fontWeight: "600" },
+  scannerBox: { flex: 1 },
+  scanCloseBtn: {
+    padding: 16,
+    backgroundColor: "#0f1923",
+    alignItems: "center",
+  },
+  scanCloseBtnText: { color: "#fff", fontWeight: "600", fontSize: 15 },
+
+  // Date picker modal
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    backgroundColor: "#1a2535",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 36,
+    borderTopWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignSelf: "center",
+    marginBottom: 20,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  modalTitle: { fontSize: 18, fontWeight: "700", color: "#fff" },
+  modalClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+
+  // Calendar
+  calWrap: { marginBottom: 20 },
+  calHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  calNavBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  calMonth: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  calWeekRow: { flexDirection: "row", marginBottom: 8 },
+  calWeekCell: { flex: 1, alignItems: "center", paddingVertical: 6 },
+  calWeekText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.5)",
+  },
+  calGrid: { flexDirection: "row", flexWrap: "wrap" },
+  calCell: {
+    width: "14.28%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 4,
+  },
+  calCellSel: { backgroundColor: "#22c55e", borderRadius: 12 },
+  calCellToday: { backgroundColor: "rgba(34,197,94,0.12)", borderRadius: 12 },
+  calDayText: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.7)",
+    fontWeight: "500",
+  },
+  calDayTextSel: { color: "#fff", fontWeight: "700" },
+  calDayTextToday: { color: "#22c55e", fontWeight: "700" },
+
+  modalBtns: { flexDirection: "row", gap: 10, marginTop: 20 },
+  modalCancelBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
+  },
+  modalCancelText: {
+    color: "rgba(255,255,255,0.6)",
+    fontSize: 15,
+    fontWeight: "600",
+  },
+  modalConfirmBtn: {
+    flex: 1,
+    paddingVertical: 13,
+    borderRadius: 12,
+    alignItems: "center",
+    backgroundColor: "#22c55e",
+  },
+  modalConfirmText: { color: "#fff", fontSize: 15, fontWeight: "700" },
 });

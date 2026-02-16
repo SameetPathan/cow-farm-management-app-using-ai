@@ -1,549 +1,557 @@
-import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
-import { get, ref } from 'firebase/database';
-import { useEffect, useState } from 'react';
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
+import { get, ref } from "firebase/database";
+import { useEffect, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Animated,
   Dimensions,
   Platform,
   RefreshControl,
-  StatusBar as RNStatusBar,
   SafeAreaView,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
-} from 'react-native';
-import { database } from '../firebaseConfig';
+  View,
+} from "react-native";
+import LanguageSelector from "../components/LanguageSelector";
+import { useLanguage } from "../contexts/LanguageContext";
+import { database } from "../firebaseConfig";
 
-const { width } = Dimensions.get('window');
-const ANDROID_STATUS_BAR = Platform.OS === 'android' ? (RNStatusBar.currentHeight || 0) : 0;
+const { width } = Dimensions.get("window");
+const CARD_GAP = 12;
+const H_PAD = 20;
+const CARD_W = (width - H_PAD * 2 - CARD_GAP) / 2;
 
-export default function HomeScreen() {
-  const [fadeAnim] = useState(new Animated.Value(0));
-  const [slideAnim] = useState(new Animated.Value(30));
-  const [userPhone, setUserPhone] = useState('');
-  const [userName, setUserName] = useState('User');
-  const [isLoading, setIsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  
-  // Dashboard Stats
-  const [stats, setStats] = useState({
-    totalCows: 0,
-    todayMilk: 0,
-    healthyCows: 0,
-    sickCows: 0,
-    todayExpenses: 0,
-    monthlyIncome: 0
+// ─── Staggered animation hook ───────────────────────────────────────────────
+function useStagger(count, delay = 80) {
+  const anims = useRef(
+    Array.from({ length: count }, () => new Animated.Value(0)),
+  ).current;
+  const run = () => {
+    Animated.stagger(
+      delay,
+      anims.map((a) =>
+        Animated.spring(a, {
+          toValue: 1,
+          useNativeDriver: true,
+          tension: 60,
+          friction: 9,
+        }),
+      ),
+    ).start();
+  };
+  const style = (i) => ({
+    opacity: anims[i],
+    transform: [
+      {
+        translateY: anims[i].interpolate({
+          inputRange: [0, 1],
+          outputRange: [24, 0],
+        }),
+      },
+    ],
   });
+  return { run, style };
+}
+
+// ─── Action tile ────────────────────────────────────────────────────────────
+function ActionTile({ item, onPress, animStyle }) {
+  return (
+    <Animated.View style={[{ width: CARD_W }, animStyle]}>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.82}
+        style={styles.actionTile}
+      >
+        <LinearGradient
+          colors={[item.color + "CC", item.color + "88"]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.actionTileGradient}
+        >
+          <View
+            style={[
+              styles.actionCircle,
+              { backgroundColor: "rgba(255,255,255,0.15)" },
+            ]}
+          />
+          <View style={styles.actionIconWrap}>
+            <Ionicons name={item.icon} size={26} color="#fff" />
+          </View>
+          <Text style={styles.actionTitle} numberOfLines={2}>
+            {item.title}
+          </Text>
+          <Text style={styles.actionSub} numberOfLines={1}>
+            {item.subtitle}
+          </Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    </Animated.View>
+  );
+}
+
+// ─── Main screen ────────────────────────────────────────────────────────────
+export default function HomeScreen() {
+  const { t } = useLanguage();
+  const [userPhone, setUserPhone] = useState("");
+  const [userName, setUserName] = useState("User");
+  const [refreshing, setRefreshing] = useState(false);
+  const [totalCows, setTotalCows] = useState(0);
+
+  const headerAnim = useRef(new Animated.Value(0)).current;
+  const statAnim = useRef(new Animated.Value(0)).current;
+  const actionStagger = useStagger(7, 60);
+
+  const runEntrance = () => {
+    Animated.spring(headerAnim, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 55,
+      friction: 8,
+    }).start();
+
+    setTimeout(() => {
+      Animated.spring(statAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 55,
+        friction: 8,
+      }).start();
+      actionStagger.run();
+    }, 150);
+  };
 
   useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
-      Animated.timing(slideAnim, { toValue: 0, duration: 800, useNativeDriver: true }),
-    ]).start();
-    
     loadUserData();
   }, []);
 
   const loadUserData = async () => {
     try {
-      const phone = await AsyncStorage.getItem('userPhone');
-      const name = await AsyncStorage.getItem('userName');
-      
-      if (phone) {
-        setUserPhone(phone);
-        setUserName(name || 'User');
-        await fetchDashboardData(phone);
-      } else {
-        router.replace('/login');
+      const phone = await AsyncStorage.getItem("userPhone");
+      const name = await AsyncStorage.getItem("userName");
+
+      if (!phone) {
+        router.replace("/login");
+        return;
       }
-    } catch (error) {
-      console.error('Error loading user data:', error);
-    } finally {
-      setIsLoading(false);
+
+      setUserPhone(phone);
+      setUserName(name || "User");
+
+      // Run entrance animations immediately
+      runEntrance();
+
+      // Load cow count in background (single fast query)
+      fetchCowCount(phone);
+    } catch (e) {
+      console.error(e);
+      router.replace("/login");
     }
   };
 
-  const fetchDashboardData = async (phone) => {
+  const fetchCowCount = async (phone) => {
     try {
-      // Fetch all cows for this user
-      const cowsRef = ref(database, 'CowFarm/cows');
-      const cowsSnapshot = await get(cowsRef);
-      
-      let totalCows = 0;
-      let userCows = [];
-      
+      const cowsSnapshot = await get(ref(database, "CowFarm/cows"));
+
       if (cowsSnapshot.exists()) {
         const allCows = cowsSnapshot.val();
-        userCows = Object.entries(allCows).filter(([id, cow]) => 
-          cow.userPhoneNumber === phone
-        );
-        totalCows = userCows.length;
+        const count = Object.values(allCows).filter(
+          (c) => c.userPhoneNumber === phone,
+        ).length;
+        setTotalCows(count);
       }
-
-      // Fetch today's milk production
-      const today = new Date();
-      const dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      
-      let todayMilk = 0;
-      for (const [cowId] of userCows) {
-        const milkRef = ref(database, `CowFarm/milkProduction/${cowId}/${dateKey}`);
-        const milkSnapshot = await get(milkRef);
-        
-        if (milkSnapshot.exists()) {
-          const milkData = milkSnapshot.val();
-          const morning = parseFloat(milkData.morning?.milkQuantity || 0);
-          const evening = parseFloat(milkData.evening?.milkQuantity || 0);
-          todayMilk += morning + evening;
-        }
-      }
-
-      // Fetch today's health reports
-      let healthyCows = 0;
-      let sickCows = 0;
-      
-      for (const [cowId] of userCows) {
-        const healthRef = ref(database, `CowFarm/healthReports/${cowId}/${dateKey}`);
-        const healthSnapshot = await get(healthRef);
-        
-        if (healthSnapshot.exists()) {
-          const healthData = healthSnapshot.val();
-          if (healthData.healthStatus === 'Healthy') {
-            healthyCows++;
-          } else if (healthData.healthStatus === 'Sick' || healthData.healthStatus === 'Under Treatment') {
-            sickCows++;
-          }
-        }
-      }
-
-      // Fetch today's expenses
-      const expensesRef = ref(database, `CowFarm/expenses/${phone}/${dateKey}`);
-      const expensesSnapshot = await get(expensesRef);
-      
-      let todayExpenses = 0;
-      if (expensesSnapshot.exists()) {
-        const expenseData = expensesSnapshot.val();
-        const feed = parseFloat(expenseData.feed || 0);
-        const doctor = parseFloat(expenseData.doctor || 0);
-        const other = parseFloat(expenseData.other || 0);
-        todayExpenses = feed + doctor + other;
-      }
-
-      // Calculate monthly income (milk price assumed ₹60/liter)
-      const monthlyIncome = await calculateMonthlyIncome(userCows, phone);
-
-      setStats({
-        totalCows,
-        todayMilk: todayMilk.toFixed(1),
-        healthyCows,
-        sickCows,
-        todayExpenses: todayExpenses.toFixed(2),
-        monthlyIncome: monthlyIncome.toFixed(2)
-      });
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
-    }
-  };
-
-  const calculateMonthlyIncome = async (userCows, phone) => {
-    try {
-      const today = new Date();
-      const currentMonth = today.getMonth();
-      const currentYear = today.getFullYear();
-      
-      let totalMilk = 0;
-      let totalExpenses = 0;
-
-      // Get all days in current month
-      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-      
-      for (let day = 1; day <= today.getDate(); day++) {
-        const dateKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-        
-        // Sum milk production
-        for (const [cowId] of userCows) {
-          const milkRef = ref(database, `CowFarm/milkProduction/${cowId}/${dateKey}`);
-          const milkSnapshot = await get(milkRef);
-          
-          if (milkSnapshot.exists()) {
-            const milkData = milkSnapshot.val();
-            const morning = parseFloat(milkData.morning?.milkQuantity || 0);
-            const evening = parseFloat(milkData.evening?.milkQuantity || 0);
-            totalMilk += morning + evening;
-          }
-        }
-
-        // Sum expenses
-        const expensesRef = ref(database, `CowFarm/expenses/${phone}/${dateKey}`);
-        const expensesSnapshot = await get(expensesRef);
-        
-        if (expensesSnapshot.exists()) {
-          const expenseData = expensesSnapshot.val();
-          const feed = parseFloat(expenseData.feed || 0);
-          const doctor = parseFloat(expenseData.doctor || 0);
-          const other = parseFloat(expenseData.other || 0);
-          totalExpenses += feed + doctor + other;
-        }
-      }
-
-      // Calculate net income (milk @ ₹60/liter - expenses)
-      const milkIncome = totalMilk * 60;
-      return milkIncome - totalExpenses;
-    } catch (error) {
-      console.error('Error calculating monthly income:', error);
-      return 0;
+    } catch (e) {
+      console.error(e);
     }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await fetchDashboardData(userPhone);
+    await fetchCowCount(userPhone);
     setRefreshing(false);
   };
 
+  const handleLogout = async () => {
+    await AsyncStorage.multiRemove(["userPhone", "userName"]);
+    router.replace("/login");
+  };
+
   const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 17) return 'Good Afternoon';
-    return 'Good Evening';
+    const h = new Date().getHours();
+    if (h < 12) return t("home.greetingMorning");
+    if (h < 17) return t("home.greetingAfternoon");
+    return t("home.greetingEvening");
   };
 
   const dashboardItems = [
-    { id: 1, title: 'Cow Registration', subtitle: 'Add new cows & QR codes', icon: 'add-circle', color: '#4CAF50', route: '/cow-registration' },
-    { id: 2, title: 'Cow Information', subtitle: 'View cow details & health', icon: 'information-circle', color: '#2196F3', route: '/cow-info' },
-    { id: 3, title: 'Daily Reports', subtitle: 'Track daily health', icon: 'document-text', color: '#ef4444', route: '/daily-reports' },
-    { id: 4, title: 'Milk Production', subtitle: 'Monitor milk yield', icon: 'water', color: '#9C27B0', route: '/milk-production' },
-    { id: 5, title: 'Expenses', subtitle: 'Track farm expenses', icon: 'calculator', color: '#FF9800', route: '/expenses' },
-    { id: 6, title: 'Reports', subtitle: 'View analytics', icon: 'bar-chart', color: '#607D8B', route: '/reports' },
-    { id: 7, title: 'AI Assistant', subtitle: 'Get help & advice', icon: 'chatbubbles', color: '#9333ea', route: '/chatbot' },
+    {
+      id: 1,
+      title: t("home.cowRegistration"),
+      subtitle: t("home.addNewCows"),
+      icon: "add-circle",
+      color: "#22c55e",
+      route: "/cow-registration",
+    },
+    {
+      id: 2,
+      title: t("home.cowInformation"),
+      subtitle: t("home.viewCowDetails"),
+      icon: "information-circle",
+      color: "#3b82f6",
+      route: "/cow-info",
+    },
+    {
+      id: 3,
+      title: t("home.dailyReports"),
+      subtitle: t("home.trackDailyHealth"),
+      icon: "document-text",
+      color: "#ef4444",
+      route: "/daily-reports",
+    },
+    {
+      id: 4,
+      title: t("home.milkProduction"),
+      subtitle: t("home.monitorMilkYield"),
+      icon: "water",
+      color: "#a855f7",
+      route: "/milk-production",
+    },
+    {
+      id: 5,
+      title: t("home.expenses"),
+      subtitle: t("home.trackFarmExpenses"),
+      icon: "calculator",
+      color: "#f97316",
+      route: "/expenses",
+    },
+    {
+      id: 6,
+      title: t("home.reports"),
+      subtitle: t("home.viewAnalytics"),
+      icon: "bar-chart",
+      color: "#06b6d4",
+      route: "/reports",
+    },
+    {
+      id: 7,
+      title: t("home.aiAssistant"),
+      subtitle: t("home.getHelpAdvice"),
+      icon: "chatbubbles",
+      color: "#ec4899",
+      route: "/chatbot",
+    },
   ];
 
-  const handleItemPress = (route) => {
-    router.push(route);
+  const headerStyle = {
+    opacity: headerAnim,
+    transform: [
+      {
+        translateY: headerAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-20, 0],
+        }),
+      },
+    ],
   };
 
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem('userPhone');
-      await AsyncStorage.removeItem('userName');
-      router.replace('/login');
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
+  const statStyle = {
+    opacity: statAnim,
+    transform: [
+      {
+        translateY: statAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [20, 0],
+        }),
+      },
+    ],
   };
-
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
-          <Text style={styles.loadingText}>Loading Dashboard...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <View style={styles.headerLeft}>
-              <View style={styles.avatarContainer}>
-                <Ionicons name="person" size={24} color="#4CAF50" />
-              </View>
-              <View>
-                <Text style={styles.greeting}>{getGreeting()}!</Text>
-                <Text style={styles.farmName}>{userName}</Text>
-              </View>
-            </View>
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              <Ionicons name="log-out-outline" size={24} color="#F44336" />
-            </TouchableOpacity>
-          </View>
+    <LinearGradient
+      colors={["#0f1923", "#142233", "#0d1f2d"]}
+      style={styles.gradient}
+    >
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="transparent"
+        translucent
+      />
+      <SafeAreaView style={styles.safe}>
+        {/* Language selector */}
+        <View style={styles.langWrap}>
+          <LanguageSelector />
         </View>
 
+        {/* Header */}
+        <Animated.View style={[styles.header, headerStyle]}>
+          <LinearGradient
+            colors={["rgba(255,255,255,0.10)", "rgba(255,255,255,0.04)"]}
+            style={styles.headerGlass}
+          >
+            <View style={styles.headerLeft}>
+              <LinearGradient
+                colors={["#22c55e", "#16a34a"]}
+                style={styles.avatar}
+              >
+                <Ionicons name="person" size={20} color="#fff" />
+              </LinearGradient>
+              <View>
+                <Text style={styles.greeting}>{getGreeting()} 👋</Text>
+                <Text style={styles.userName}>{userName}</Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              onPress={handleLogout}
+              activeOpacity={0.7}
+              style={styles.logoutBtn}
+            >
+              <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+            </TouchableOpacity>
+          </LinearGradient>
+        </Animated.View>
+
+        {/* Scrollable body */}
         <ScrollView
-          style={styles.dashboard}
-          contentContainerStyle={styles.dashboardContent}
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#4CAF50']} />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor="#22c55e"
+              colors={["#22c55e"]}
+            />
           }
         >
-          {/* Stats Overview */}
-          <View style={styles.statsSection}>
-            <Text style={styles.sectionTitle}>Farm Overview</Text>
-            
-            <View style={styles.statsGrid}>
-              {/* Total Cows */}
-              <View style={[styles.statCard, { backgroundColor: '#e8f5e8' }]}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="leaf" size={24} color="#4CAF50" />
-                </View>
-                <Text style={styles.statNumber}>{stats.totalCows}</Text>
-                <Text style={styles.statLabel}>Total Cows</Text>
+          {/* Farm overview - Single stat card */}
+          <Animated.View style={statStyle}>
+            <Text style={styles.sectionLabel}>{t("home.farmOverview")}</Text>
+            <LinearGradient
+              colors={["rgba(255,255,255,0.14)", "rgba(255,255,255,0.06)"]}
+              style={styles.overviewCard}
+            >
+              <View style={styles.overviewIconBadge}>
+                <Ionicons name="leaf" size={32} color="#22c55e" />
               </View>
-
-              {/* Today's Milk */}
-              <View style={[styles.statCard, { backgroundColor: '#e3f2fd' }]}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="water" size={24} color="#2196F3" />
-                </View>
-                <Text style={styles.statNumber}>{stats.todayMilk}L</Text>
-                <Text style={styles.statLabel}>Today's Milk</Text>
+              <View style={styles.overviewContent}>
+                <Text style={styles.overviewLabel}>{t("home.totalCows")}</Text>
+                <Text style={styles.overviewValue}>{totalCows}</Text>
+                <Text style={styles.overviewSubtext}>
+                  Registered in your farm
+                </Text>
               </View>
-
-              {/* Healthy Cows */}
-              <View style={[styles.statCard, { backgroundColor: '#f1f8e9' }]}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="heart" size={24} color="#8BC34A" />
-                </View>
-                <Text style={styles.statNumber}>{stats.healthyCows}</Text>
-                <Text style={styles.statLabel}>Healthy</Text>
-              </View>
-
-              {/* Sick Cows */}
-              <View style={[styles.statCard, { backgroundColor: '#ffebee' }]}>
-                <View style={styles.statIconContainer}>
-                  <Ionicons name="medkit" size={24} color="#F44336" />
-                </View>
-                <Text style={styles.statNumber}>{stats.sickCows}</Text>
-                <Text style={styles.statLabel}>Need Care</Text>
-              </View>
-            </View>
-
-            {/* Financial Cards */}
-            <View style={styles.financialSection}>
-              <View style={styles.financialCard}>
-                <View style={styles.financialHeader}>
-                  <Ionicons name="trending-up" size={24} color="#4CAF50" />
-                  <Text style={styles.financialLabel}>Monthly Income</Text>
-                </View>
-                <Text style={[styles.financialAmount, { color: '#4CAF50' }]}>₹{stats.monthlyIncome}</Text>
-                <Text style={styles.financialSubtext}>Net profit this month</Text>
-              </View>
-
-              <View style={styles.financialCard}>
-                <View style={styles.financialHeader}>
-                  <Ionicons name="cash-outline" size={24} color="#FF9800" />
-                  <Text style={styles.financialLabel}>Today's Expenses</Text>
-                </View>
-                <Text style={[styles.financialAmount, { color: '#FF9800' }]}>₹{stats.todayExpenses}</Text>
-                <Text style={styles.financialSubtext}>Feed, medical & others</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Quick Actions */}
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.grid}>
-            {dashboardItems.map((item) => (
-              <Animated.View 
-                key={item.id} 
-                style={[styles.gridItem, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}
+              <TouchableOpacity
+                onPress={() => router.push("/cow-info")}
+                style={styles.overviewBtn}
+                activeOpacity={0.7}
               >
-                <TouchableOpacity 
-                  style={[styles.itemCard, { borderLeftColor: item.color }]} 
-                  onPress={() => handleItemPress(item.route)}
-                  activeOpacity={0.7}
-                >
-                  <View style={[styles.iconContainer, { backgroundColor: item.color + '20' }]}>
-                    <Ionicons name={item.icon} size={28} color={item.color} />
-                  </View>
-                  <Text style={styles.itemTitle}>{item.title}</Text>
-                  <Text style={styles.itemSubtitle}>{item.subtitle}</Text>
-                </TouchableOpacity>
-              </Animated.View>
+                <Ionicons name="arrow-forward" size={20} color="#22c55e" />
+              </TouchableOpacity>
+            </LinearGradient>
+          </Animated.View>
+
+          {/* Quick actions */}
+          <Text style={[styles.sectionLabel, { marginTop: 28 }]}>
+            {t("home.quickActions")}
+          </Text>
+          <View style={styles.row}>
+            {dashboardItems.map((item, i) => (
+              <ActionTile
+                key={item.id}
+                item={item}
+                onPress={() => router.push(item.route)}
+                animStyle={actionStagger.style(i)}
+              />
             ))}
           </View>
         </ScrollView>
-      </Animated.View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
+// ─── Styles ─────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
-  content: { flex: 1 },
-  loadingContainer: {
+  gradient: { flex: 1 },
+  safe: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingTop: Platform.OS === "android" ? StatusBar.currentHeight || 0 : 0,
   },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#7f8c8d',
+
+  // Language
+  langWrap: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 52 : (StatusBar.currentHeight || 0) + 12,
+    right: 16,
+    zIndex: 1000,
   },
+
+  // Header
   header: {
-    backgroundColor: 'white',
-    paddingHorizontal: 20,
-    paddingTop: 20 + ANDROID_STATUS_BAR,
-    paddingBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3.84,
-    elevation: 5,
+    marginHorizontal: H_PAD,
+    marginTop: Platform.OS === "ios" ? 60 : (StatusBar.currentHeight || 0) + 16,
+    marginBottom: 20,
+    borderRadius: 20,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.1)",
   },
-  headerTop: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center',
+  headerGlass: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  headerLeft: { flexDirection: "row", alignItems: "center", gap: 12 },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  avatarContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#e8f5e8',
-    justifyContent: 'center',
-    alignItems: 'center',
+  greeting: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.55)",
+    fontWeight: "500",
+    marginBottom: 2,
   },
-  greeting: { 
-    fontSize: 14, 
-    color: '#7f8c8d', 
-    marginBottom: 2 
+  userName: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#fff",
+    letterSpacing: 0.2,
   },
-  farmName: { 
-    fontSize: 20, 
-    fontWeight: 'bold', 
-    color: '#2c3e50' 
+  logoutBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor: "rgba(239,68,68,0.12)",
+    justifyContent: "center",
+    alignItems: "center",
   },
-  logoutButton: { 
-    padding: 8, 
-    borderRadius: 8, 
-    backgroundColor: '#fff5f5' 
-  },
-  dashboard: { 
-    flex: 1, 
-    paddingHorizontal: 20 
-  },
-  dashboardContent: { 
-    paddingBottom: 24, 
-    paddingTop: 20 
-  },
-  statsSection: {
-    marginBottom: 24,
-  },
-  sectionTitle: { 
-    fontSize: 20, 
-    fontWeight: 'bold', 
-    color: '#2c3e50', 
-    marginBottom: 16 
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 16,
-  },
-  statCard: {
-    width: (width - 64) / 2,
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  statIconContainer: {
-    marginBottom: 8,
-  },
-  statNumber: { 
-    fontSize: 28, 
-    fontWeight: 'bold', 
-    color: '#2c3e50', 
-    marginBottom: 4 
-  },
-  statLabel: { 
-    fontSize: 13, 
-    color: '#7f8c8d', 
-    textAlign: 'center',
-    fontWeight: '500'
-  },
-  financialSection: {
-    gap: 12,
-  },
-  financialCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  financialHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+
+  // Scroll
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: H_PAD, paddingBottom: 40 },
+
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: "700",
+    letterSpacing: 1.1,
+    color: "rgba(255,255,255,0.45)",
+    textTransform: "uppercase",
     marginBottom: 12,
   },
-  financialLabel: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    fontWeight: '600',
+
+  // Overview card
+  overviewCard: {
+    borderRadius: 18,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.09)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 16,
+    marginBottom: 16,
   },
-  financialAmount: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  financialSubtext: {
-    fontSize: 12,
-    color: '#95a5a6',
-  },
-  grid: { 
-    flexDirection: 'row', 
-    flexWrap: 'wrap', 
-    gap: 12 
-  },
-  gridItem: { 
-    width: (width - 52) / 2 
-  },
-  itemCard: {
-    backgroundColor: 'white',
+  overviewIconBadge: {
+    width: 60,
+    height: 60,
     borderRadius: 16,
-    padding: 16,
-    borderLeftWidth: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    backgroundColor: "rgba(34,197,94,0.18)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  overviewContent: {
+    flex: 1,
+  },
+  overviewLabel: {
+    fontSize: 12,
+    color: "rgba(255,255,255,0.5)",
+    fontWeight: "600",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  overviewValue: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: -0.5,
+    marginBottom: 2,
+  },
+  overviewSubtext: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.4)",
+    fontWeight: "500",
+  },
+  overviewBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "rgba(34,197,94,0.12)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(34,197,94,0.2)",
+  },
+
+  // Action tiles
+  row: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: CARD_GAP,
+  },
+  actionTile: {
+    width: CARD_W,
+    borderRadius: 18,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 6,
+  },
+  actionTileGradient: {
+    padding: 18,
     minHeight: 140,
+    justifyContent: "flex-end",
+    overflow: "hidden",
   },
-  iconContainer: { 
-    width: 50, 
-    height: 50, 
-    borderRadius: 25, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    marginBottom: 12 
+  actionCircle: {
+    position: "absolute",
+    top: -18,
+    right: -18,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
   },
-  itemTitle: { 
-    fontSize: 15, 
-    fontWeight: 'bold', 
-    color: '#2c3e50', 
-    marginBottom: 4 
+  actionIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
   },
-  itemSubtitle: { 
-    fontSize: 12, 
-    color: '#7f8c8d', 
-    lineHeight: 16 
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: 3,
+    lineHeight: 18,
+  },
+  actionSub: {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.72)",
+    fontWeight: "500",
   },
 });
