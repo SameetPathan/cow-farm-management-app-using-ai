@@ -35,6 +35,10 @@ export default function RootLayout() {
               name="milk-production"
               options={{ headerShown: false }}
             />
+            <Stack.Screen
+              name="daily-reports"
+              options={{ headerShown: false }}
+            />
             <Stack.Screen name="expenses" options={{ headerShown: false }} />
             <Stack.Screen name="reports" options={{ headerShown: false }} />
             <Stack.Screen name="chatbot" options={{ headerShown: false }} />
