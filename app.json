@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "cow-farm-management",
-    "slug": "cow-farm-management",
+    "name": "CattleCare",
+    "slug": "CattleCare",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "cowfarmmanagement",
+    "scheme": "CattleCare",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
-      "package": "com.cowfarmmanagement.app",
+      "package": "com.cattlecare.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
