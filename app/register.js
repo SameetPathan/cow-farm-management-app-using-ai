@@ -22,6 +22,61 @@ import LanguageSelector from "../components/LanguageSelector";
 import { useLanguage } from "../contexts/LanguageContext";
 import { database } from "../firebaseConfig";
 
+// ✅ InputField is now OUTSIDE RegisterScreen — fixes keyboard dismiss / single char bug
+const InputField = ({
+  icon,
+  label,
+  placeholder,
+  field,
+  keyboardType,
+  autoCapitalize,
+  isPassword,
+  showPw,
+  togglePw,
+  maxLength,
+  formData,
+  onChangeText,
+}) => (
+  <View style={styles.inputWrapper}>
+    <Text style={styles.label}>{label}</Text>
+    <LinearGradient
+      colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.04)"]}
+      style={styles.inputContainer}
+    >
+      <Ionicons
+        name={icon}
+        size={20}
+        color="#22c55e"
+        style={styles.inputIcon}
+      />
+      <TextInput
+        style={styles.input}
+        placeholder={placeholder}
+        placeholderTextColor="rgba(255,255,255,0.3)"
+        value={formData[field]}
+        onChangeText={(val) => onChangeText(field, val)}
+        keyboardType={keyboardType || "default"}
+        autoCapitalize={autoCapitalize || "sentences"}
+        secureTextEntry={isPassword ? !showPw : false}
+        maxLength={maxLength}
+      />
+      {isPassword && (
+        <TouchableOpacity
+          onPress={togglePw}
+          style={styles.eyeBtn}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={showPw ? "eye-off" : "eye"}
+            size={20}
+            color="rgba(255,255,255,0.5)"
+          />
+        </TouchableOpacity>
+      )}
+    </LinearGradient>
+  </View>
+);
+
 export default function RegisterScreen() {
   const { t } = useLanguage();
   const [formData, setFormData] = useState({
@@ -144,58 +199,6 @@ export default function RegisterScreen() {
       });
   };
 
-  const InputField = ({
-    icon,
-    label,
-    placeholder,
-    field,
-    keyboardType,
-    autoCapitalize,
-    isPassword,
-    showPw,
-    togglePw,
-    maxLength,
-  }) => (
-    <View style={styles.inputWrapper}>
-      <Text style={styles.label}>{label}</Text>
-      <LinearGradient
-        colors={["rgba(255,255,255,0.08)", "rgba(255,255,255,0.04)"]}
-        style={styles.inputContainer}
-      >
-        <Ionicons
-          name={icon}
-          size={20}
-          color="#22c55e"
-          style={styles.inputIcon}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder={placeholder}
-          placeholderTextColor="rgba(255,255,255,0.3)"
-          value={formData[field]}
-          onChangeText={(val) => handleInputChange(field, val)}
-          keyboardType={keyboardType || "default"}
-          autoCapitalize={autoCapitalize || "sentences"}
-          secureTextEntry={isPassword ? !showPw : false}
-          maxLength={maxLength}
-        />
-        {isPassword && (
-          <TouchableOpacity
-            onPress={togglePw}
-            style={styles.eyeBtn}
-            activeOpacity={0.7}
-          >
-            <Ionicons
-              name={showPw ? "eye-off" : "eye"}
-              size={20}
-              color="rgba(255,255,255,0.5)"
-            />
-          </TouchableOpacity>
-        )}
-      </LinearGradient>
-    </View>
-  );
-
   const animStyle = {
     opacity: fadeAnim,
     transform: [{ translateY: slideAnim }],
@@ -248,6 +251,8 @@ export default function RegisterScreen() {
                   label={t("register.fullName")}
                   placeholder="Enter your full name"
                   field="fullName"
+                  formData={formData}
+                  onChangeText={handleInputChange}
                 />
                 <InputField
                   icon="call"
@@ -257,6 +262,8 @@ export default function RegisterScreen() {
                   keyboardType="phone-pad"
                   autoCapitalize="none"
                   maxLength={10}
+                  formData={formData}
+                  onChangeText={handleInputChange}
                 />
                 <InputField
                   icon="mail"
@@ -265,6 +272,8 @@ export default function RegisterScreen() {
                   field="email"
                   keyboardType="email-address"
                   autoCapitalize="none"
+                  formData={formData}
+                  onChangeText={handleInputChange}
                 />
                 <InputField
                   icon="lock-closed"
@@ -275,6 +284,8 @@ export default function RegisterScreen() {
                   isPassword
                   showPw={showPassword}
                   togglePw={() => setShowPassword((v) => !v)}
+                  formData={formData}
+                  onChangeText={handleInputChange}
                 />
                 <InputField
                   icon="lock-closed"
@@ -285,6 +296,8 @@ export default function RegisterScreen() {
                   isPassword
                   showPw={showConfirmPassword}
                   togglePw={() => setShowConfirmPassword((v) => !v)}
+                  formData={formData}
+                  onChangeText={handleInputChange}
                 />
 
                 {/* Register Button */}
