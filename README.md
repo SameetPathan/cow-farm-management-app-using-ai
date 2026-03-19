@@ -48,3 +48,31 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+
+# to run
+
+npm install -g eas-cli
+eas login
+eas build:configure
+eas build -p android --profile preview
+
+npx expo prebuild
+
+
+cd android
+./gradlew assembleDebug        # for debug APK
+./gradlew assembleRelease      # for release APK
+
+.\fix-android.ps1
+cd android
+.\gradlew clean
+.\gradlew assembleDebug
+
+cd D:\App\farm\android
+.\gradlew assembleRelease
+```
+
+APK will be at:
+```
+android\app\build\outputs\apk\release\app-release.apk
